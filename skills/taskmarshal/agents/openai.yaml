@@ -1,0 +1,12 @@
+interface:
+  display_name: "TaskMarshal"
+  short_description: "Delegate complex coding work to local CLI agent workers."
+  default_prompt: "Use $taskmarshal to decide whether to delegate this complex coding task to a local worker and review the result."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "taskmarshal-mcp"
+      description: "Local MCP server exposing TaskMarshal worker session control."
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,44 @@
+{
+  "name": "taskmarshal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex-led task dispatch and review for local CLI coding-agent workers.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BRCOO/TaskMarshal.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BRCOO/TaskMarshal/issues"
+  },
+  "homepage": "https://github.com/BRCOO/TaskMarshal#readme",
+  "keywords": [
+    "codex",
+    "mcp",
+    "reasonix",
+    "deepseek",
+    "coding-agent",
+    "task-orchestration",
+    "cli-agent"
+  ],
+  "bin": {
+    "reasonixctl": "./reasonixctl.js",
+    "reasonix-mcp": "./mcp-server.js",
+    "taskmarshal-mcp": "./mcp-server.js"
+  },
+  "scripts": {
+    "check": "node --check reasonixctl.js && node --check lib/acp-client.js && node --check mcp-server.js",
+    "doctor": "node reasonixctl.js doctor",
+    "mcp": "node mcp-server.js",
+    "mcp:smoke": "node scripts/mcp-smoke.js",
+    "smoke": "node reasonixctl.js smoke"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}

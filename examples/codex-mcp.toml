@@ -1,0 +1,3 @@
+[mcp_servers.taskmarshal-mcp]
+command = "node"
+args = ["C:\\path\\to\\TaskMarshal\\mcp-server.js"]
