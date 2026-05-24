@@ -10,8 +10,8 @@ TaskMarshal has three layers:
 Codex
   -> skills/taskmarshal
   -> mcp-server.js
-  -> reasonixctl.js
-  -> reasonix acp
+  -> provider adapter
+  -> reasonix acp / claude -p
 ```
 
 ## Skill
@@ -42,8 +42,10 @@ worker_stop
 
 Reasonix aliases are kept for compatibility but should not be the primary API for new providers.
 
-## Reasonix Adapter
+## Provider Adapters
 
 `reasonixctl.js` runs `reasonix acp`, speaks NDJSON JSON-RPC through `lib/acp-client.js`, and keeps persistent session daemons under the user's home directory.
 
-No provider API keys are stored in this repository. Reasonix reads its own local config from `~/.reasonix/config.json`.
+The Claude Code provider uses `claude -p --output-format json` and records logical sessions under `~/.taskmarshal/providers/claude-code/sessions`. Claude Code permissions stay inside Claude Code; TaskMarshal cannot externally approve or deny Claude Code permission prompts.
+
+No provider API keys are stored in this repository. Reasonix reads its own local config from `~/.reasonix/config.json`; Claude Code uses its own local authentication.

@@ -9,7 +9,7 @@
   <a href="https://github.com/BRCOO/TaskMarshal/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Node >=22" src="https://img.shields.io/badge/node-%3E%3D22-339933.svg">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-stdio-111827.svg">
-  <img alt="Provider: Reasonix" src="https://img.shields.io/badge/provider-Reasonix%20%2F%20DeepSeek-4B5563.svg">
+  <img alt="Providers: Reasonix + Claude Code" src="https://img.shields.io/badge/providers-Reasonix%20%2B%20Claude%20Code-4B5563.svg">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 TaskMarshal turns Codex into a technical lead for local AI coding agents. Codex decides when delegation is worth it, writes a bounded task spec, sends work to a worker, observes progress, gates permissions, and reviews the result before accepting it.
 
-The first worker provider is [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). The provider layer is intentionally generic so future adapters can target Gemini CLI, Claude Code CLI, Codex CLI, or other local coding agents.
+The first worker providers are [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) and Claude Code. The provider layer is intentionally generic so future adapters can target Gemini CLI, Codex CLI, or other local coding agents.
 
 ```text
 User -> Codex -> TaskMarshal Skill -> taskmarshal-mcp -> Provider Adapter -> CLI Worker
@@ -49,6 +49,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Provider-neutral MCP tools: `worker_*`
 - Reasonix compatibility tools: `reasonix_*`
 - Persistent Reasonix ACP sessions
+- Claude Code one-shot and resumable logical sessions
 - Manual approval gate for worker permissions
 - Event observation through JSONL session logs
 - Codex Skill for autonomous delegation decisions
@@ -56,9 +57,9 @@ Coding agents are useful executors, but architecture ownership should stay with 
 
 ## Quickstart
 
-### 1. Install Reasonix
+### 1. Install a worker provider
 
-Reasonix is the first implemented provider.
+Reasonix:
 
 ```bash
 npm install -g reasonix
@@ -73,6 +74,13 @@ Reasonix stores its DeepSeek API key in your local user config:
 ```
 
 TaskMarshal does not need this key in the repository.
+
+Claude Code:
+
+```bash
+claude --version
+claude auth
+```
 
 ### 2. Install TaskMarshal
 
@@ -149,8 +157,8 @@ The TaskMarshal Skill chooses between:
 | Provider | Status | Session control | Observe events | Manual approval | Notes |
 |---|---:|---:|---:|---:|---|
 | Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Uses `reasonix acp` through `reasonixctl`. |
+| Claude Code | Implemented | Logical session | Yes | No | Uses `claude -p --output-format json`; permissions stay inside Claude Code. |
 | Gemini CLI | Planned | TBD | TBD | TBD | Future adapter. |
-| Claude Code CLI | Planned | TBD | TBD | TBD | Future adapter. |
 | Codex CLI | Planned | TBD | TBD | TBD | Future adapter. |
 
 ## MCP Tools
@@ -210,6 +218,17 @@ node reasonixctl.js stop architect
 ```
 
 Use `--approve manual` when Codex should gate worker permissions. Use `--approve cancel` for read-only one-shot analysis.
+
+Claude Code provider through MCP:
+
+```text
+worker_ask(provider: "claude-code", prompt: "Analyze this repo in plan mode", approve: "cancel")
+worker_start_session(provider: "claude-code", id: "claude-review", approve: "cancel")
+worker_send_task(provider: "claude-code", id: "claude-review", prompt: "Review these files")
+worker_observe(provider: "claude-code", id: "claude-review", tail: 20)
+```
+
+Claude Code does not expose an external permission callback to TaskMarshal. `worker_approve`, `worker_deny`, and `worker_cancel` return unsupported for `claude-code`; use Claude Code permission modes for safety.
 
 ## Delegation Policy
 

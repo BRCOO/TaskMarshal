@@ -18,7 +18,7 @@ const hasReasonixAlias = tools.tools.some((tool) => tool.name === "reasonix_send
 const providerIds = providers.structuredContent?.data?.providers?.map((provider) => provider.id) ?? [];
 
 console.log(JSON.stringify({
-  ok: hasWorkerSendTask && hasReasonixAlias && providerIds.includes("reasonix"),
+  ok: hasWorkerSendTask && hasReasonixAlias && providerIds.includes("reasonix") && providerIds.includes("claude-code"),
   toolCount: tools.tools.length,
   hasWorkerSendTask,
   hasReasonixAlias,

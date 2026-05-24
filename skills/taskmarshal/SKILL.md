@@ -18,8 +18,9 @@ TaskMarshal lets Codex act as planner, dispatcher, permission gate, and final re
 Current provider:
 
 - `reasonix`: DeepSeek/Reasonix through `reasonixctl` and `taskmarshal-mcp`.
+- `claude-code`: Claude Code through `claude -p --output-format json`.
 
-Future providers may include Gemini CLI, Claude Code CLI, Codex CLI, or other local agents. Keep workflow rules provider-neutral.
+Future providers may include Gemini CLI, Codex CLI, or other local agents. Keep workflow rules provider-neutral.
 
 ## Activation Gate
 
@@ -82,7 +83,8 @@ Choose the smallest mode that fits.
 
 ## Provider Choice
 
-- Default to `reasonix` while it is the only implemented provider.
+- Default to `reasonix` for supervised execution with external permission gating.
+- Use `claude-code` for Claude Code one-shot analysis or resumable logical sessions when external permission approval is not required.
 - Prefer providers based on explicit user request first, then task fit.
 - If a requested provider is not implemented, say so briefly and use the best available provider only if it still fits the user's goal.
 
@@ -149,6 +151,7 @@ If `taskmarshal-mcp` tools are available, prefer:
 - `worker_list_providers` to inspect available providers.
 - `worker_doctor` before first use in a session.
 - `worker_start_session` with `provider: "reasonix"` and `approve: "manual"` for persistent work.
+- `worker_start_session` with `provider: "claude-code"` and `approve: "cancel"` for Claude Code plan-mode sessions.
 - `worker_send_task` for bounded prompts.
 - `worker_observe` while work is running.
 - `worker_approve` only for expected, scoped permission requests.
