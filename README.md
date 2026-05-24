@@ -1,29 +1,48 @@
-# TaskMarshal
+<h1 align="center">TaskMarshal</h1>
 
-**Codex-led task dispatch and review for local CLI coding agents.**
+<p align="center">
+  <strong>Codex-led task dispatch and review for local CLI coding agents.</strong>
+</p>
 
-TaskMarshal lets Codex act like a technical lead: it decides when delegation is worth it, writes a bounded task spec, sends work to a local CLI agent, gates permissions, observes progress, and reviews the result before accepting it.
+<p align="center">
+  <a href="https://github.com/BRCOO/TaskMarshal/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/BRCOO/TaskMarshal/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/BRCOO/TaskMarshal/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Node >=22" src="https://img.shields.io/badge/node-%3E%3D22-339933.svg">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-stdio-111827.svg">
+  <img alt="Provider: Reasonix" src="https://img.shields.io/badge/provider-Reasonix%20%2F%20DeepSeek-4B5563.svg">
+</p>
 
-The first provider is [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). The provider layer is intentionally generic so future adapters can target Gemini CLI, Claude Code CLI, Codex CLI, or other local coding agents.
+<p align="center">
+  <a href="#quickstart">Quickstart</a>
+  |
+  <a href="#how-it-works">How It Works</a>
+  |
+  <a href="#mcp-tools">MCP Tools</a>
+  |
+  <a href="#security-model">Security</a>
+  |
+  <a href="#roadmap">Roadmap</a>
+</p>
+
+TaskMarshal turns Codex into a technical lead for local AI coding agents. Codex decides when delegation is worth it, writes a bounded task spec, sends work to a worker, observes progress, gates permissions, and reviews the result before accepting it.
+
+The first worker provider is [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix). The provider layer is intentionally generic so future adapters can target Gemini CLI, Claude Code CLI, Codex CLI, or other local coding agents.
 
 ```text
-User
-  -> Codex
-    -> TaskMarshal skill
-      -> taskmarshal-mcp
-        -> provider adapter
-          -> Reasonix / Gemini CLI / Claude Code CLI / ...
+User -> Codex -> TaskMarshal Skill -> taskmarshal-mcp -> Provider Adapter -> CLI Worker
 ```
 
-## Why
+## Why TaskMarshal
 
-Most coding agents are good at execution, but they should not automatically own architecture decisions. TaskMarshal separates the roles:
+Coding agents are useful executors, but architecture ownership should stay with the lead agent. TaskMarshal keeps that boundary explicit.
 
-- **Codex** plans, scopes, delegates, approves, reviews, and reports.
-- **Worker agents** execute bounded tasks inside a controlled session.
-- **MCP tools** provide a structured control surface instead of fragile terminal scraping.
-
-For small tasks, Codex should just do the work. For complex tasks, TaskMarshal gives Codex a repeatable way to bring in a worker without giving up control.
+| Problem | TaskMarshal's answer |
+|---|---|
+| "Should I delegate this?" | A Codex Skill scores the task and skips workers for simple work. |
+| "How do I control another CLI agent?" | An MCP server exposes structured worker tools instead of TUI scraping. |
+| "Who approves risky actions?" | Codex keeps the permission gate and can approve, deny, or cancel worker turns. |
+| "How do I review worker output?" | Codex treats worker results as proposed patches and verifies them locally. |
+| "Can this support more than Reasonix?" | Providers are named explicitly; `reasonix` is the first adapter, not the whole system. |
 
 ## Current Status
 
@@ -33,13 +52,13 @@ For small tasks, Codex should just do the work. For complex tasks, TaskMarshal g
 - Manual approval gate for worker permissions
 - Event observation through JSONL session logs
 - Codex Skill for autonomous delegation decisions
-- No secrets committed or required in this repository
+- Secret-free repository: no API keys, transcripts, or local state
 
-## Requirements
+## Quickstart
 
-- Node.js `>=22`
-- Codex CLI or Codex desktop with MCP support
-- Reasonix for the first provider:
+### 1. Install Reasonix
+
+Reasonix is the first implemented provider.
 
 ```bash
 npm install -g reasonix
@@ -47,89 +66,131 @@ reasonix setup
 reasonix doctor
 ```
 
-Reasonix stores its DeepSeek API key in your local user config, not in this repository:
+Reasonix stores its DeepSeek API key in your local user config:
 
 ```text
 ~/.reasonix/config.json
 ```
 
-Do not commit `~/.reasonix`, `~/.reasonixctl`, `.env`, transcripts, or local config files.
+TaskMarshal does not need this key in the repository.
 
-## Install
-
-Clone and install dependencies:
+### 2. Install TaskMarshal
 
 ```bash
 git clone https://github.com/BRCOO/TaskMarshal.git
 cd TaskMarshal
 npm install
 npm run check
+npm run mcp:smoke
 ```
 
-Register the MCP server with Codex:
+### 3. Register the MCP server with Codex
+
+Windows:
 
 ```bash
 codex mcp add taskmarshal-mcp -- node C:\\path\\to\\TaskMarshal\\mcp-server.js
 codex mcp list
 ```
 
-On macOS/Linux, use your absolute clone path:
+macOS/Linux:
 
 ```bash
 codex mcp add taskmarshal-mcp -- node /path/to/TaskMarshal/mcp-server.js
+codex mcp list
 ```
 
-## Install The Skill
+### 4. Install the Codex Skill
 
-Copy the skill into your Codex skills directory:
+Windows PowerShell:
 
 ```powershell
 Copy-Item -Recurse .\skills\taskmarshal "$env:USERPROFILE\.codex\skills\taskmarshal" -Force
 ```
 
-On macOS/Linux:
+macOS/Linux:
 
 ```bash
 mkdir -p ~/.codex/skills
 cp -R skills/taskmarshal ~/.codex/skills/taskmarshal
 ```
 
-The skill is a routing policy. It may decide **not** to start a worker when the task is simple.
+Restart Codex or open a fresh Codex thread if newly registered MCP tools or skills do not appear immediately.
+
+## How It Works
+
+```text
+User
+  |
+  v
+Codex  -- decides whether delegation is worth it --> Local Mode
+  |
+  | uses TaskMarshal Skill
+  v
+taskmarshal-mcp
+  |
+  | worker_* tools
+  v
+reasonixctl adapter  -- current provider --> Reasonix / DeepSeek
+  |
+  | ACP JSON-RPC
+  v
+session events/logs  --> Codex observes, approves, denies, and reviews
+```
+
+The TaskMarshal Skill chooses between:
+
+- **Local Mode:** Codex handles simple work directly.
+- **Light Mode:** one bounded worker prompt.
+- **Full Marshal Mode:** Codex plans, dispatches, observes, approves, reviews, and verifies.
+
+## Provider Matrix
+
+| Provider | Status | Session control | Observe events | Manual approval | Notes |
+|---|---:|---:|---:|---:|---|
+| Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Uses `reasonix acp` through `reasonixctl`. |
+| Gemini CLI | Planned | TBD | TBD | TBD | Future adapter. |
+| Claude Code CLI | Planned | TBD | TBD | TBD | Future adapter. |
+| Codex CLI | Planned | TBD | TBD | TBD | Future adapter. |
 
 ## MCP Tools
 
 Provider-neutral tools:
 
-- `worker_list_providers`
-- `worker_doctor`
-- `worker_ask`
-- `worker_start_session`
-- `worker_list_sessions`
-- `worker_status`
-- `worker_send_task`
-- `worker_observe`
-- `worker_approve`
-- `worker_deny`
-- `worker_cancel`
-- `worker_stop`
+| Tool | Purpose |
+|---|---|
+| `worker_list_providers` | List available worker providers. |
+| `worker_doctor` | Check provider installation/configuration. |
+| `worker_ask` | Run one prompt with a worker. |
+| `worker_start_session` | Start a persistent worker session. |
+| `worker_list_sessions` | List known worker sessions. |
+| `worker_status` | Inspect one worker session. |
+| `worker_send_task` | Send a bounded task to a session. |
+| `worker_observe` | Read recent worker events. |
+| `worker_approve` | Approve a pending permission request. |
+| `worker_deny` | Deny a pending permission request. |
+| `worker_cancel` | Cancel the current worker turn. |
+| `worker_stop` | Stop a worker session. |
 
-Reasonix compatibility aliases are also exposed:
+Reasonix compatibility aliases are also available:
 
-- `reasonix_doctor`
-- `reasonix_ask`
-- `reasonix_start_session`
-- `reasonix_list_sessions`
-- `reasonix_status`
-- `reasonix_send_task`
-- `reasonix_observe`
-- `reasonix_approve`
-- `reasonix_deny`
-- `reasonix_cancel`
-- `reasonix_stop`
+```text
+reasonix_doctor
+reasonix_ask
+reasonix_start_session
+reasonix_list_sessions
+reasonix_status
+reasonix_send_task
+reasonix_observe
+reasonix_approve
+reasonix_deny
+reasonix_cancel
+reasonix_stop
+```
 
 ## Direct CLI Usage
 
-You can use the Reasonix control CLI directly without MCP:
+Use the Reasonix adapter without MCP:
 
 ```bash
 node reasonixctl.js doctor
@@ -170,15 +231,11 @@ Poor fits:
 - formatting or typo fixes
 - routine documentation edits
 
-The Codex skill uses a small scoring rule to choose between:
+The Skill's scoring rule is intentionally simple. It loads for tasks that look delegation-worthy, then may still choose Local Mode if the overhead is not justified.
 
-- **Local Mode:** Codex works directly.
-- **Light Mode:** One bounded worker prompt.
-- **Full Marshal Mode:** Codex plans, dispatches, observes, approves, reviews, and verifies.
+## Security Model
 
-## Security Notes
-
-This repository should never contain API keys or private transcripts.
+TaskMarshal should never contain your provider API keys or private transcripts.
 
 Ignored by default:
 
@@ -192,20 +249,28 @@ Ignored by default:
 - `*.jsonl`
 - private key formats such as `*.pem`, `*.key`, `*.p12`, `*.pfx`
 
-Before publishing, run:
+Recommended pre-push checks:
 
 ```bash
 git status --short
 npm run check
-```
-
-Then scan for accidental secrets with your preferred scanner. A basic local grep is also useful:
-
-```bash
+npm run mcp:smoke
 git grep -n -E "sk-[A-Za-z0-9_-]{20,}|api[_-]?key|token|secret|password" -- .
 ```
 
-The grep may match documentation text. Review matches before committing.
+The grep may match documentation or source identifiers. Review matches before committing.
+
+## Project Layout
+
+```text
+.
+├── mcp-server.js                 # TaskMarshal MCP server
+├── reasonixctl.js                # Reasonix provider control CLI
+├── lib/acp-client.js             # ACP JSON-RPC client
+├── skills/taskmarshal/           # Codex Skill
+├── scripts/mcp-smoke.js          # MCP smoke test
+└── examples/                     # Example config and worker prompt
+```
 
 ## Roadmap
 
@@ -216,6 +281,10 @@ The grep may match documentation text. Review matches before committing.
 - Task spec persistence
 - Better transcript summarization
 - Packaged Codex plugin
+
+## Contributing
+
+Issues and pull requests are welcome. Keep provider adapters scoped, keep secrets out of fixtures, and add a smoke test path whenever a provider exposes new MCP tools.
 
 ## License
 
