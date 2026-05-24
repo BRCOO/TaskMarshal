@@ -1,6 +1,14 @@
 ---
 name: taskmarshal
-description: Use as an autonomous routing policy for deciding whether Codex should delegate coding work to local CLI agent workers through TaskMarshal. Trigger when the user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude Code, worker mode, or planner/executor/reviewer flow, or when a coding task looks complex enough to consider delegation: multi-file implementation, broad repo investigation, long-running debugging, independent verification, or external worker orchestration. The skill may decide not to start a worker after scoring the task. Avoid for quick answers, simple shell commands, small one-file edits, formatting, routine documentation edits, or straightforward local fixes unless the user explicitly requests a worker.
+description: >
+  Use as an autonomous routing policy for deciding whether Codex should delegate
+  coding work to local CLI agent workers through TaskMarshal. Trigger when the
+  user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude
+  Code, worker mode, or planner/executor/reviewer flow, or when a coding task
+  looks complex enough to consider delegation. The skill may decide not to start
+  a worker after scoring the task. Avoid for quick answers, simple shell
+  commands, small one-file edits, formatting, routine documentation edits, or
+  straightforward local fixes unless the user explicitly requests a worker.
 ---
 
 # TaskMarshal
