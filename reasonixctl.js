@@ -14,12 +14,28 @@ const STATE_DIR = resolve(homedir(), ".reasonixctl");
 const SESSION_DIR = resolve(STATE_DIR, "sessions");
 const REASONIX_COMMAND = resolveReasonixCommand();
 const THIS_FILE = fileURLToPath(import.meta.url);
+const REASONIX_MODELS = [
+  {
+    id: "deepseek-v4-flash",
+    aliases: ["flash", "v4-flash", "deepseek-flash"],
+    useFor: "Fast, low-cost analysis, repo exploration, routine implementation, and long sessions."
+  },
+  {
+    id: "deepseek-v4-pro",
+    aliases: ["pro", "v4-pro", "deepseek-pro"],
+    useFor: "Hard architecture, tricky debugging, final review, and tasks where higher reasoning quality is worth the cost."
+  }
+];
+const REASONIX_MODEL_ALIASES = new Map(
+  REASONIX_MODELS.flatMap((model) => [[model.id, model.id], ...model.aliases.map((alias) => [alias, model.id])])
+);
 
 function main() {
   const [cmd = "help", ...args] = process.argv.slice(2);
   if (cmd === "help" || cmd === "-h" || cmd === "--help") return help();
   if (cmd === "version" || cmd === "--version" || cmd === "-V") return output({ version: VERSION });
   if (cmd === "doctor") return doctor();
+  if (cmd === "models") return models();
   if (cmd === "ask") return ask(args);
   if (cmd === "smoke") return smoke();
   if (cmd === "start") return startSession(args);
@@ -54,6 +70,16 @@ async function doctor() {
     stateDir: STATE_DIR,
     sessionDir: SESSION_DIR,
     node: process.version
+  });
+}
+
+function models() {
+  output({
+    ok: true,
+    provider: "reasonix",
+    models: REASONIX_MODELS,
+    presets: ["auto", "flash", "pro"],
+    note: "TaskMarshal accepts aliases such as flash/pro and passes canonical DeepSeek v4 model ids to reasonix --model."
   });
 }
 
@@ -116,6 +142,9 @@ async function startSession(args) {
     port: null,
     token,
     approve: opts.approve,
+    model: opts.model ?? null,
+    preset: opts.preset ?? null,
+    budget: opts.budget ?? null,
     sessionId: null,
     transcript,
     events
@@ -156,10 +185,13 @@ async function startSession(args) {
     dir,
     sessionId: meta?.sessionId,
     approve: meta?.approve,
+    model: meta?.model ?? null,
+    preset: meta?.preset ?? null,
+    budget: meta?.budget ?? null,
     transcript,
     events
   };
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  output(payload);
 }
 
 async function listSessions() {
@@ -179,6 +211,9 @@ async function listSessions() {
       dir: meta.dir,
       sessionId: meta.sessionId,
       approve: meta.approve,
+      model: meta.model ?? null,
+      preset: meta.preset ?? null,
+      budget: meta.budget ?? null,
       startedAt: meta.startedAt,
       lastTurn: meta.lastTurn ?? null
     });
@@ -453,6 +488,8 @@ function parseAskArgs(args) {
   if (!["cancel", "once", "always", "reject"].includes(out.approve)) {
     throw new Error("--approve must be one of: cancel, once, always, reject");
   }
+  out.model = normalizeReasonixModel(out.model);
+  validateReasonixPreset(out.preset);
   return out;
 }
 
@@ -475,6 +512,8 @@ function parseStartArgs(args) {
     else throw new Error(`Unknown start option: ${a}`);
   }
   validateApproveMode(out.approve, true);
+  out.model = normalizeReasonixModel(out.model);
+  validateReasonixPreset(out.preset);
   return out;
 }
 
@@ -499,6 +538,8 @@ function parseDaemonArgs(args) {
     if (!out[key]) throw new Error(`daemon missing --${key}`);
   }
   validateApproveMode(out.approve, true);
+  out.model = normalizeReasonixModel(out.model);
+  validateReasonixPreset(out.preset);
   return out;
 }
 
@@ -530,13 +571,28 @@ function validateApproveMode(mode, allowManual = false) {
   if (!allowed.includes(mode)) throw new Error(`approve mode must be one of: ${allowed.join(", ")}`);
 }
 
+function normalizeReasonixModel(model) {
+  if (!model) return undefined;
+  const key = String(model).trim().toLowerCase();
+  if (!key) return undefined;
+  return REASONIX_MODEL_ALIASES.get(key) ?? model;
+}
+
+function validateReasonixPreset(preset) {
+  if (!preset) return;
+  if (!["auto", "flash", "pro"].includes(preset)) {
+    throw new Error("--preset must be one of: auto, flash, pro");
+  }
+}
+
 function help() {
   console.log(`reasonixctl ${VERSION}
 
 Usage:
   reasonixctl doctor
-  reasonixctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--yolo]
-  reasonixctl start [--dir PATH] [--approve manual|cancel|once|always|reject]
+  reasonixctl models
+  reasonixctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
+  reasonixctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   reasonixctl list
   reasonixctl status SESSION_ID
   reasonixctl send SESSION_ID "prompt"
@@ -548,6 +604,7 @@ Usage:
   reasonixctl smoke
 
 Notes:
+  DeepSeek v4 aliases: flash -> deepseek-v4-flash, pro -> deepseek-v4-pro.
   ask uses Reasonix's native ACP JSON-RPC stdio agent.
   Events and transcripts are written under ~/.reasonixctl/runs by default.
   start creates a persistent local daemon backed by reasonix acp.
@@ -602,6 +659,9 @@ function writeDaemonMeta(metaPath, opts, state) {
     port: state.port ?? previous.port ?? null,
     dir: opts.dir,
     approve: opts.approve,
+    model: opts.model ?? null,
+    preset: opts.preset ?? null,
+    budget: opts.budget ?? null,
     sessionId: state.sessionId ?? previous.sessionId ?? null,
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
@@ -629,6 +689,9 @@ function publicDaemonState(opts, state) {
     port: state.port,
     dir: opts.dir,
     approve: opts.approve,
+    model: opts.model ?? null,
+    preset: opts.preset ?? null,
+    budget: opts.budget ?? null,
     sessionId: state.sessionId,
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
@@ -765,7 +828,7 @@ function output(value, json = true) {
   else console.log(String(value));
 }
 
-main().catch((err) => {
+Promise.resolve(main()).catch((err) => {
   console.error(err.stack || err.message || String(err));
   process.exit(1);
 });

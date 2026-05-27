@@ -20,7 +20,7 @@ TaskMarshal lets Codex act as planner, dispatcher, permission gate, and final re
 
 Current provider:
 
-- `reasonix`: DeepSeek/Reasonix through `reasonixctl` and `taskmarshal-mcp`.
+- `reasonix`: DeepSeek/Reasonix through `reasonixctl` and `taskmarshal-mcp`; supports DeepSeek v4 `flash` and `pro` model selection.
 - `claude-code`: Claude Code through `claude -p --output-format json`.
 
 Future providers may include Gemini CLI, Codex CLI, or other local agents. Keep workflow rules provider-neutral.
@@ -90,6 +90,8 @@ Choose the smallest mode that fits.
 ## Provider Choice
 
 - Default to `reasonix` for supervised execution with external permission gating.
+- For Reasonix, use `model: "flash"` for quick exploration, routine implementation, low-cost long sessions, and first-pass work.
+- For Reasonix, use `model: "pro"` for hard architecture, tricky debugging, final review, higher-stakes verification, or tasks where quality is worth extra cost.
 - Use `claude-code` for Claude Code one-shot analysis or resumable logical sessions when external permission approval is not required.
 - Prefer providers based on explicit user request first, then task fit.
 - If a requested provider is not implemented, say so briefly and use the best available provider only if it still fits the user's goal.
@@ -156,7 +158,7 @@ If `taskmarshal-mcp` tools are available, prefer:
 
 - `worker_list_providers` to inspect available providers.
 - `worker_doctor` before first use in a session.
-- `worker_start_session` with `provider: "reasonix"` and `approve: "manual"` for persistent work.
+- `worker_start_session` with `provider: "reasonix"` and `approve: "manual"` for persistent work; add `model: "flash"` or `model: "pro"` when model fit matters.
 - `worker_start_session` with `provider: "claude-code"` and `approve: "cancel"` for Claude Code plan-mode sessions.
 - `worker_send_task` for bounded prompts.
 - `worker_observe` while work is running.

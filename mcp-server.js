@@ -20,6 +20,7 @@ const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "cl
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
 const AskApproveMode = z.enum(["cancel", "once", "always", "reject"]);
+const REASONIX_MODEL_DESCRIPTION = "Optional Reasonix model override. Accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro.";
 
 const providers = [
   {
@@ -30,10 +31,24 @@ const providers = [
     status: "implemented",
     strengths: [
       "DeepSeek-native coding worker",
+      "DeepSeek v4 flash/pro model selection",
       "persistent ACP sessions",
       "manual permission gate",
       "low-cost long sessions via DeepSeek cache design"
     ],
+    models: [
+      {
+        id: "deepseek-v4-flash",
+        aliases: ["flash", "v4-flash", "deepseek-flash"],
+        useFor: "Fast, low-cost analysis, repo exploration, routine implementation, and long sessions."
+      },
+      {
+        id: "deepseek-v4-pro",
+        aliases: ["pro", "v4-pro", "deepseek-pro"],
+        useFor: "Hard architecture, tricky debugging, final review, and tasks where higher reasoning quality is worth the cost."
+      }
+    ],
+    presets: ["auto", "flash", "pro"],
     tools: {
       oneShot: true,
       persistentSessions: true,
@@ -103,7 +118,7 @@ function registerWorkerTools() {
       prompt: z.string().min(1).describe("Prompt to send to the worker."),
       dir: z.string().optional().describe("Working directory. Defaults to the MCP server directory."),
       approve: AskApproveMode.default("cancel").describe("Automatic permission policy for this one-shot turn."),
-      model: z.string().optional().describe("Optional provider model override."),
+      model: z.string().optional().describe("Optional provider model override. For Reasonix, accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro."),
       preset: z.string().optional().describe("Optional provider preset override."),
       budget: z.string().optional().describe("Optional provider budget override."),
       yolo: z.boolean().default(false).describe("Pass provider-specific all-permissions mode. Use only for fully trusted tasks.")
@@ -130,7 +145,7 @@ function registerWorkerTools() {
       id: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional().describe("Optional stable session id."),
       dir: z.string().optional().describe("Working directory for the worker. Defaults to the MCP server directory."),
       approve: ApproveMode.default("manual").describe("Permission policy. 'manual' pauses until worker_approve or worker_deny."),
-      model: z.string().optional().describe("Optional provider model override."),
+      model: z.string().optional().describe("Optional provider model override. For Reasonix, accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro."),
       preset: z.string().optional().describe("Optional provider preset override."),
       budget: z.string().optional().describe("Optional provider budget override."),
       yolo: z.boolean().default(false).describe("Pass provider-specific all-permissions mode. Use only for fully trusted tasks.")
@@ -270,7 +285,7 @@ function registerReasonixCompatTools() {
       prompt: z.string().min(1).describe("Prompt to send to Reasonix."),
       dir: z.string().optional().describe("Working directory. Defaults to the MCP server directory."),
       approve: AskApproveMode.default("cancel").describe("Automatic permission policy for this one-shot turn."),
-      model: z.string().optional().describe("Optional Reasonix model override."),
+      model: z.string().optional().describe(REASONIX_MODEL_DESCRIPTION),
       preset: z.string().optional().describe("Optional Reasonix preset override."),
       budget: z.string().optional().describe("Optional Reasonix budget override."),
       yolo: z.boolean().default(false).describe("Pass --yolo to Reasonix. Use only for fully trusted tasks.")
@@ -293,7 +308,7 @@ function registerReasonixCompatTools() {
       id: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional().describe("Optional stable session id."),
       dir: z.string().optional().describe("Working directory for Reasonix. Defaults to the MCP server directory."),
       approve: ApproveMode.default("manual").describe("Permission policy. 'manual' pauses until reasonix_approve or reasonix_deny."),
-      model: z.string().optional().describe("Optional Reasonix model override."),
+      model: z.string().optional().describe(REASONIX_MODEL_DESCRIPTION),
       preset: z.string().optional().describe("Optional Reasonix preset override."),
       budget: z.string().optional().describe("Optional Reasonix budget override."),
       yolo: z.boolean().default(false).describe("Pass --yolo to Reasonix. Use only for fully trusted tasks.")

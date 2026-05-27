@@ -49,6 +49,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Provider-neutral MCP tools: `worker_*`
 - Reasonix compatibility tools: `reasonix_*`
 - Persistent Reasonix ACP sessions
+- DeepSeek v4 `flash` / `pro` selection for Reasonix
 - Claude Code one-shot and resumable logical sessions
 - Manual approval gate for worker permissions
 - Event observation through JSONL session logs
@@ -156,7 +157,7 @@ The TaskMarshal Skill chooses between:
 
 | Provider | Status | Session control | Observe events | Manual approval | Notes |
 |---|---:|---:|---:|---:|---|
-| Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Uses `reasonix acp` through `reasonixctl`. |
+| Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Uses `reasonix acp` through `reasonixctl`; supports DeepSeek v4 `flash` and `pro`. |
 | Claude Code | Implemented | Logical session | Yes | No | Uses `claude -p --output-format json`; permissions stay inside Claude Code. |
 | Gemini CLI | Planned | TBD | TBD | TBD | Future adapter. |
 | Codex CLI | Planned | TBD | TBD | TBD | Future adapter. |
@@ -180,6 +181,15 @@ Provider-neutral tools:
 | `worker_cancel` | Cancel the current worker turn. |
 | `worker_stop` | Stop a worker session. |
 
+For Reasonix, `worker_ask` and `worker_start_session` accept:
+
+| Option | Values | Notes |
+|---|---|---|
+| `model` | `flash`, `pro`, `deepseek-v4-flash`, `deepseek-v4-pro` | `flash` maps to `deepseek-v4-flash`; `pro` maps to `deepseek-v4-pro`. |
+| `preset` | `auto`, `flash`, `pro` | Passed through to Reasonix preset selection. |
+
+Use `flash` for quick exploration, routine implementation, and low-cost long sessions. Use `pro` for hard architecture, tricky debugging, final review, or higher-stakes verification.
+
 Reasonix compatibility aliases are also available:
 
 ```text
@@ -202,14 +212,17 @@ Use the Reasonix adapter without MCP:
 
 ```bash
 node reasonixctl.js doctor
+node reasonixctl.js models
 node reasonixctl.js smoke
 node reasonixctl.js ask "Summarize this repository. Do not edit files." --approve cancel
+node reasonixctl.js ask "Review this design for risks." --approve cancel --model pro
 ```
 
 Persistent session:
 
 ```bash
 node reasonixctl.js start --id architect --dir C:\\path\\to\\repo --approve manual
+node reasonixctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
 node reasonixctl.js send architect "Analyze the repo. Do not edit files."
 node reasonixctl.js observe architect --tail 80
 node reasonixctl.js approve architect

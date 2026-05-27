@@ -16,13 +16,21 @@ const providers = await client.callTool({ name: "worker_list_providers", argumen
 const hasWorkerSendTask = tools.tools.some((tool) => tool.name === "worker_send_task");
 const hasReasonixAlias = tools.tools.some((tool) => tool.name === "reasonix_send_task");
 const providerIds = providers.structuredContent?.data?.providers?.map((provider) => provider.id) ?? [];
+const reasonix = providers.structuredContent?.data?.providers?.find((provider) => provider.id === "reasonix");
+const reasonixModels = reasonix?.models?.map((model) => model.id) ?? [];
 
 console.log(JSON.stringify({
-  ok: hasWorkerSendTask && hasReasonixAlias && providerIds.includes("reasonix") && providerIds.includes("claude-code"),
+  ok: hasWorkerSendTask
+    && hasReasonixAlias
+    && providerIds.includes("reasonix")
+    && providerIds.includes("claude-code")
+    && reasonixModels.includes("deepseek-v4-flash")
+    && reasonixModels.includes("deepseek-v4-pro"),
   toolCount: tools.tools.length,
   hasWorkerSendTask,
   hasReasonixAlias,
-  providers: providerIds
+  providers: providerIds,
+  reasonixModels
 }, null, 2));
 
 await client.close();
