@@ -1,14 +1,17 @@
 ---
 name: taskmarshal
 description: >
-  Use as an autonomous routing policy for deciding whether Codex should delegate
-  coding work to local CLI agent workers through TaskMarshal. Trigger when the
-  user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude
-  Code, worker mode, or planner/executor/reviewer flow, or when a coding task
-  looks complex enough to consider delegation. The skill may decide not to start
-  a worker after scoring the task. Avoid for quick answers, simple shell
-  commands, small one-file edits, formatting, routine documentation edits, or
-  straightforward local fixes unless the user explicitly requests a worker.
+  Autonomous routing policy for deciding whether Codex should delegate coding
+  work to local CLI agent workers through TaskMarshal. Use whenever the user
+  mentions TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude Code, local AI
+  workers, agent delegation, subagents, multi-agent coding, planner/executor,
+  architect/implementer/reviewer workflows, or asks Codex to design, assign,
+  supervise, or validate work done by another CLI agent. Also use for coding
+  tasks that appear to span multiple files, modules, packages, architectural
+  layers, long-running debugging, repo exploration, implementation plus review,
+  or independent verification. After loading, score the task and choose Local,
+  Light, or Full Marshal mode; loading this skill does not mean a worker must be
+  started.
 ---
 
 # TaskMarshal
@@ -42,7 +45,10 @@ Use TaskMarshal when at least one is true:
 - the task benefits from a second pass, long-running exploration, reproduction, or separate verification
 - Codex needs to keep architecture decisions while another agent does bounded execution
 
-If unsure, do the work locally in Codex. Delegation should buy real leverage.
+If unsure, load this routing policy and make an explicit Local, Light, or Full
+Marshal choice. Delegation should buy real leverage, but a short read-only
+worker pass is acceptable when independent exploration or verification could
+reduce risk.
 
 ## Delegation Score
 
@@ -60,7 +66,7 @@ When this skill is loaded, score the task before starting a worker:
 Decision:
 
 - score `<= 0`: Local Mode. Do not start a worker.
-- score `1-2`: Light Mode only if the user asked for a worker or a second pass is genuinely useful.
+- score `1-2`: Light Mode if the user asked for a worker, the task mentions delegation patterns, or a second pass is genuinely useful.
 - score `>= 3`: Full Marshal Mode is appropriate.
 
 Never tell the user about the numeric score unless it helps explain a routing decision.
