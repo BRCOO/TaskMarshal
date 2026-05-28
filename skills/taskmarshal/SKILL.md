@@ -1,13 +1,14 @@
 ---
 name: taskmarshal
 description: >
-  TaskMarshal routing preflight for Codex coding and software-engineering
-  requests. Use to decide whether Codex should work locally or delegate a
-  bounded task to local CLI agent workers. Trigger for ordinary coding tasks,
-  repo changes, debugging, reviews, architecture, refactors, multi-file work,
-  tests, task planning, implementation plus verification, or any mention of
-  TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude Code, local AI workers,
-  agent delegation, subagents, multi-agent coding, planner/executor, or
+  TaskMarshal routing preflight for Codex technical work. Use to decide whether
+  Codex should work locally or delegate a bounded task to local CLI agent
+  workers. Trigger for coding, repository changes, debugging, reviews,
+  architecture, refactors, tests, technical research, product or tool
+  evaluation, software/vendor comparison, engineering due diligence, task
+  planning, implementation plus verification, or any mention of TaskMarshal,
+  Reasonix, DeepSeek, Gemini CLI, Claude Code, local AI workers, agent
+  delegation, subagents, multi-agent coding, planner/executor, or
   architect/implementer/reviewer workflows. After loading, score the task and
   choose Local, Light, or Full Marshal mode; loading this skill does not mean a
   worker must be started.
@@ -34,12 +35,14 @@ Do not delegate by default for:
 - simple terminal checks
 - small one-file edits
 - formatting, renaming, typo fixes, or routine docs
+- simple lookups or short research answers that Codex can verify directly
 - bugs where Codex can inspect, patch, and verify faster locally
 
 Use TaskMarshal when at least one is true:
 
 - the user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Gemini CLI, Claude Code, worker mode, or planner/executor flow
 - the task spans several files, modules, packages, or architectural layers
+- the task is technical research, tool selection, vendor/product comparison, or engineering due diligence where an independent second pass would reduce risk
 - the task needs independent implementation after Codex designs the approach
 - the task benefits from a second pass, long-running exploration, reproduction, or separate verification
 - Codex needs to keep architecture decisions while another agent does bounded execution
@@ -56,9 +59,11 @@ When this skill is loaded, score the task before starting a worker:
 - `+2` user explicitly asks for TaskMarshal, a named provider, worker mode, planner/executor, or architect/reviewer flow
 - `+2` task spans three or more files, packages, or architectural layers
 - `+2` task needs long repo exploration, reproduction, or debugging
+- `+2` task is a technical research, tool-selection, or product-comparison request with multiple candidates and source verification
 - `+1` independent implementation or verification would reduce risk
 - `+1` task can run in parallel while Codex inspects or designs non-overlapping work
 - `-2` task is a quick answer, simple command, or obvious local edit
+- `-2` task is a simple lookup or short research answer that Codex can verify directly
 - `-2` task is a tiny one-file patch with clear implementation
 - `-1` the worker would need broad permissions before Codex has scoped the work
 
