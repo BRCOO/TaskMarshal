@@ -2,7 +2,7 @@
 
 ## TaskMarshal Routing
 
-For every user request, first perform a silent routing check for TaskMarshal.
+For every user request, first perform a TaskMarshal routing check.
 The check decides whether Codex should handle the work locally or delegate a
 bounded task to a local CLI worker such as Reasonix.
 
@@ -26,5 +26,12 @@ When using Reasonix:
   higher-stakes verification, security-sensitive changes, or when a `flash`
   result is uncertain.
 
-Keep this routing check silent unless delegation is chosen or the user asks how
-the decision was made.
+Show the routing result near the start of coding-related turns using one concise
+line:
+
+```text
+TaskMarshal: Local | Light(reasonix:flash) | Full(reasonix:pro) - <short reason>
+```
+
+Then continue with the work. Do not show this line for purely conversational,
+non-engineering questions unless the user asks about routing.
