@@ -126,6 +126,24 @@ cp -R skills/taskmarshal ~/.codex/skills/taskmarshal
 
 Restart Codex or open a fresh Codex thread if newly registered MCP tools or skills do not appear immediately.
 
+### 5. Optional: make routing habitual
+
+Codex Skills are recalled by metadata, not as guaranteed global hooks. If you want Codex to consider TaskMarshal on every request, copy the global instruction template into your Codex home:
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .\examples\codex-AGENTS.md "$env:USERPROFILE\.codex\AGENTS.md" -Force
+```
+
+macOS/Linux:
+
+```bash
+cp examples/codex-AGENTS.md ~/.codex/AGENTS.md
+```
+
+This does not force every task into Reasonix. It only makes Codex run a silent routing check first, then choose Local Mode, Light Mode, or Full Marshal Mode.
+
 ## How It Works
 
 ```text
