@@ -56,7 +56,9 @@ debugging TaskMarshal or provider adapters.
 
 ## Provider Adapters
 
-`reasonixctl.js` runs `reasonix acp`, speaks NDJSON JSON-RPC through `lib/acp-client.js`, and keeps persistent session daemons under the user's home directory.
+`taskmarshalctl.js` runs `reasonix acp`, speaks NDJSON JSON-RPC through
+`lib/acp-client.js`, and keeps persistent Reasonix session daemons under the
+user's home directory. `reasonixctl.js` remains as a compatibility shim.
 
 The Claude Code provider uses `claude -p --output-format json` and records logical sessions under `~/.taskmarshal/providers/claude-code/sessions`. Claude Code permissions stay inside Claude Code; TaskMarshal cannot externally approve or deny Claude Code permission prompts.
 

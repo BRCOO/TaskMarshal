@@ -54,7 +54,7 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add a diff-based yield protocol.
   - Acceptance: every worker handoff names changed files, commands run, test
     results, risks, and next action.
-- [ ] Add a second-pass review path using `pro`.
+- [x] Add a second-pass review path using `pro`.
   - Acceptance: `flash` can implement or explore; `pro` can audit tricky final
     changes when risk justifies the extra cost.
 
@@ -63,13 +63,13 @@ delegation more controlled, verifiable, and reusable.
 - [x] Make `worker_*` the primary documented API.
   - Acceptance: Reasonix compatibility aliases remain available, but examples
     prefer provider-neutral tools.
-- [ ] Add a provider capability summary in docs.
+- [x] Add a provider capability summary in docs.
   - Acceptance: users can see which providers support persistent sessions,
     observation, manual approval, cancellation, and model selection.
-- [ ] Consider a config flag to hide compatibility aliases in future.
+- [x] Consider a config flag to hide compatibility aliases in future.
   - Acceptance: token-sensitive installations can reduce the exposed MCP tool
     list.
-- [ ] Rename `reasonixctl.js` to a provider-neutral CLI with a compatibility
+- [x] Rename `reasonixctl.js` to a provider-neutral CLI with a compatibility
   shim.
   - Suggested path: add `taskmarshalctl.js`, keep `reasonixctl.js` as a shim,
     then migrate docs and state dirs in a later release.

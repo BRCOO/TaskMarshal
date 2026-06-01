@@ -113,6 +113,7 @@ Prefer provider-neutral tools:
 - `worker_send_task`
 - `worker_observe`
 - `worker_summarize_session`
+- `worker_plan_pro_review`
 - `worker_approve`
 - `worker_deny`
 - `worker_cancel`
@@ -130,6 +131,10 @@ worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
 
 Use `worker_observe(mode: "events")` only when compact summary/final/permission
 views are not enough.
+
+Use `worker_plan_pro_review` before spending a Reasonix `pro` pass. Reserve
+`pro` for architecture, tricky debugging, security-sensitive work, uncertain
+`flash` results, and final review.
 
 Approve only scoped, expected, non-destructive worker requests. Deny or cancel
 requests that exceed scope, touch secrets, perform destructive git commands,

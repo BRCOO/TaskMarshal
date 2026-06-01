@@ -23,16 +23,17 @@
     "cli-agent"
   ],
   "bin": {
+    "taskmarshalctl": "./taskmarshalctl.js",
     "reasonixctl": "./reasonixctl.js",
     "reasonix-mcp": "./mcp-server.js",
     "taskmarshal-mcp": "./mcp-server.js"
   },
   "scripts": {
-    "check": "node --check reasonixctl.js && node --check lib/acp-client.js && node --check mcp-server.js",
-    "doctor": "node reasonixctl.js doctor",
+    "check": "node --check taskmarshalctl.js && node --check reasonixctl.js && node --check lib/acp-client.js && node --check mcp-server.js",
+    "doctor": "node taskmarshalctl.js doctor",
     "mcp": "node mcp-server.js",
     "mcp:smoke": "node scripts/mcp-smoke.js",
-    "smoke": "node reasonixctl.js smoke"
+    "smoke": "node taskmarshalctl.js smoke"
   },
   "engines": {
     "node": ">=22"

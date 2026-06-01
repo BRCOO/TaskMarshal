@@ -47,7 +47,8 @@ Coding agents are useful executors, but architecture ownership should stay with 
 ## Current Status
 
 - Provider-neutral MCP tools: `worker_*`
-- Reasonix compatibility tools: `reasonix_*`
+- Optional Reasonix compatibility tools: `reasonix_*`
+- Provider-neutral CLI: `taskmarshalctl.js`; `reasonixctl.js` is a shim
 - Persistent Reasonix ACP sessions
 - DeepSeek v4 `flash` / `pro` selection for Reasonix
 - Claude Code one-shot and resumable logical sessions
@@ -55,6 +56,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Event observation through JSONL session logs
 - Compact observation modes for token-sensitive supervision
 - Session summaries with lightweight task metrics
+- Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
 - Secret-free repository: no API keys, transcripts, or local state
@@ -161,7 +163,7 @@ taskmarshal-mcp
   |
   | worker_* tools
   v
-reasonixctl adapter  -- current provider --> Reasonix / DeepSeek
+taskmarshalctl adapter  -- current provider --> Reasonix / DeepSeek
   |
   | ACP JSON-RPC
   v
@@ -176,12 +178,12 @@ The TaskMarshal Skill chooses between:
 
 ## Provider Matrix
 
-| Provider | Status | Session control | Observe events | Manual approval | Notes |
-|---|---:|---:|---:|---:|---|
-| Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Uses `reasonix acp` through `reasonixctl`; supports DeepSeek v4 `flash` and `pro`. |
-| Claude Code | Implemented | Logical session | Yes | No | Uses `claude -p --output-format json`; permissions stay inside Claude Code. |
-| Gemini CLI | Planned | TBD | TBD | TBD | Future adapter. |
-| Codex CLI | Planned | TBD | TBD | TBD | Future adapter. |
+| Provider | Status | Persistent sessions | Observe | Manual approval | Cancel | Model selection | Cost info | Notes |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Reasonix / DeepSeek | Implemented | Yes | Yes | Yes | Yes | Yes (`flash`/`pro`) | No | Uses `reasonix acp` through `taskmarshalctl`; supports DeepSeek v4 `flash` and `pro`. |
+| Claude Code | Implemented | Logical session | Yes | No | No | Yes | Yes, when Claude CLI reports it | Uses `claude -p --output-format json`; permissions stay inside Claude Code. |
+| Gemini CLI | Planned | TBD | TBD | TBD | TBD | TBD | TBD | Future adapter. |
+| Codex CLI | Planned | TBD | TBD | TBD | TBD | TBD | TBD | Future adapter. |
 
 ## MCP Tools
 
@@ -198,6 +200,7 @@ Provider-neutral tools:
 | `worker_send_task` | Send a bounded task to a session. |
 | `worker_observe` | Read recent worker events. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
+| `worker_plan_pro_review` | Build a bounded DeepSeek v4 pro second-pass review task. |
 | `worker_approve` | Approve a pending permission request. |
 | `worker_deny` | Deny a pending permission request. |
 | `worker_cancel` | Cancel the current worker turn. |
@@ -250,32 +253,38 @@ reasonix_cancel
 reasonix_stop
 ```
 
+Set `TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS=1` before launching
+`taskmarshal-mcp` to hide the `reasonix_*` compatibility tools and reduce the
+MCP tool list. The provider-neutral `worker_*` tools remain available.
+
 ## Direct CLI Usage
 
 Use the Reasonix adapter without MCP:
 
 ```bash
-node reasonixctl.js doctor
-node reasonixctl.js models
-node reasonixctl.js smoke
-node reasonixctl.js ask "Summarize this repository. Do not edit files." --approve cancel
-node reasonixctl.js ask "Review this design for risks." --approve cancel --model pro
+node taskmarshalctl.js doctor
+node taskmarshalctl.js models
+node taskmarshalctl.js smoke
+node taskmarshalctl.js ask "Summarize this repository. Do not edit files." --approve cancel
+node taskmarshalctl.js ask "Review this design for risks." --approve cancel --model pro
 ```
 
 Persistent session:
 
 ```bash
-node reasonixctl.js start --id architect --dir C:\\path\\to\\repo --approve manual
-node reasonixctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
-node reasonixctl.js send architect "Analyze the repo. Do not edit files."
-node reasonixctl.js observe architect --mode summary --max-chars 4000
-node reasonixctl.js summarize architect --max-chars 6000
-node reasonixctl.js approve architect
-node reasonixctl.js deny architect
-node reasonixctl.js stop architect
+node taskmarshalctl.js start --id architect --dir C:\\path\\to\\repo --approve manual
+node taskmarshalctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
+node taskmarshalctl.js send architect "Analyze the repo. Do not edit files."
+node taskmarshalctl.js observe architect --mode summary --max-chars 4000
+node taskmarshalctl.js summarize architect --max-chars 6000
+node taskmarshalctl.js approve architect
+node taskmarshalctl.js deny architect
+node taskmarshalctl.js stop architect
 ```
 
-Use `--approve manual` when Codex should gate worker permissions. Use `--approve cancel` for read-only one-shot analysis.
+Use `--approve manual` when Codex should gate worker permissions. Use
+`--approve cancel` for read-only one-shot analysis. `reasonixctl.js` remains as
+a compatibility shim for older scripts.
 
 Claude Code provider through MCP:
 
@@ -300,6 +309,12 @@ The economical TaskMarshal loop is:
    the worker finishes.
 6. Worker returns a diff-oriented yield summary.
 7. Codex reviews the changed files and verifies locally.
+
+Use `flash` for exploration, routine implementation, and low-risk long
+sessions. Use `pro` only for architecture decisions, tricky debugging,
+security-sensitive changes, uncertain `flash` results, or final verification
+where a stronger second pass is worth the cost. `worker_plan_pro_review` returns
+a bounded read-only review prompt and recommended `pro` session settings.
 
 Reasonix session summaries are also written to
 `~/.reasonixctl/sessions/<id>/session-summary.json`. New persistent Reasonix
@@ -370,7 +385,8 @@ The grep may match documentation or source identifiers. Review matches before co
 ```text
 .
 ├── mcp-server.js                 # TaskMarshal MCP server
-├── reasonixctl.js                # Reasonix provider control CLI
+├── taskmarshalctl.js             # Provider-neutral TaskMarshal CLI
+├── reasonixctl.js                # Compatibility shim
 ├── lib/acp-client.js             # ACP JSON-RPC client
 ├── skills/taskmarshal/           # Codex Skill
 ├── scripts/mcp-smoke.js          # MCP smoke test

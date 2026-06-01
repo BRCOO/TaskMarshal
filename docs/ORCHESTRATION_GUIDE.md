@@ -78,6 +78,32 @@ persistent Reasonix turns also append `metrics.jsonl` in the session directory.
 These records are intentionally small and secret-free, and can later drive
 Local / flash / pro routing decisions.
 
+## Pro Second Pass
+
+Use Reasonix `flash` for exploration, routine implementation, low-risk long
+sessions, and first-pass work. Use Reasonix `pro` only when the extra reasoning
+cost is justified:
+
+- architecture or interface-boundary decisions
+- tricky debugging or uncertain root cause
+- security-sensitive, migration, auth, data-loss, or release-facing changes
+- final review after a worker patch
+- a `flash` result that is incomplete, contradictory, or high impact
+
+Prefer `worker_plan_pro_review` before starting a `pro` session. It returns a
+bounded read-only reviewer prompt and recommended session settings, while Codex
+keeps final acceptance authority.
+
+## Provider Capabilities
+
+| Provider | Persistent sessions | Observe | Manual approval | Cancel | Model selection | Cost info |
+|---|---:|---:|---:|---:|---:|---:|
+| Reasonix / DeepSeek | Yes | Yes | Yes | Yes | Yes (`flash`/`pro`) | No |
+| Claude Code | Logical session | Yes | No | No | Yes | Yes, when Claude CLI reports it |
+
+Set `TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS=1` before launching the MCP server
+to hide `reasonix_*` compatibility aliases and reduce MCP tool-list tokens.
+
 ## Model Policy
 
 - Use `flash` for exploration, routine implementation, long low-cost sessions,

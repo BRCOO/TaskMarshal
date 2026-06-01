@@ -11,23 +11,25 @@ import * as z from "zod/v4";
 
 const VERSION = "0.1.0";
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const CTL = resolve(ROOT, "reasonixctl.js");
+const CTL = resolve(ROOT, "taskmarshalctl.js");
 const STATE_DIR = resolve(homedir(), ".taskmarshal");
 const CLAUDE_SESSION_DIR = resolve(STATE_DIR, "providers", "claude-code", "sessions");
 const CLAUDE_COMMAND = process.platform === "win32" ? "cmd.exe" : "claude";
 const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "claude"] : [];
+const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS);
 
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
 const AskApproveMode = z.enum(["cancel", "once", "always", "reject"]);
 const ObserveMode = z.enum(["events", "summary", "final", "permission"]);
+const ReviewRisk = z.enum(["low", "medium", "high"]);
 const REASONIX_MODEL_DESCRIPTION = "Optional Reasonix model override. Accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro.";
 
 const providers = [
   {
     id: "reasonix",
     displayName: "Reasonix",
-    adapter: "reasonixctl",
+    adapter: "taskmarshalctl",
     command: "reasonix acp",
     status: "implemented",
     strengths: [
@@ -90,7 +92,7 @@ const server = new McpServer({
 });
 
 registerWorkerTools();
-registerReasonixCompatTools();
+if (!HIDE_LEGACY_REASONIX_TOOLS) registerReasonixCompatTools();
 
 function registerWorkerTools() {
   server.registerTool("worker_list_providers", {
@@ -234,6 +236,32 @@ function registerWorkerTools() {
     reasonix: () => runCtl(["summarize", id, "--max-chars", String(maxChars)]),
     "claude-code": () => claudeSummarizeSession({ id, maxChars })
   }));
+
+  server.registerTool("worker_plan_pro_review", {
+    title: "TaskMarshal Plan Pro Review",
+    description: "Create a bounded DeepSeek v4 pro second-pass review task for high-risk, architecture, tricky debugging, or final verification work.",
+    inputSchema: {
+      goal: z.string().min(1).describe("Concrete review objective."),
+      risk: ReviewRisk.default("high").describe("Review risk level."),
+      scope: z.string().default("").describe("Files, modules, or decision surface to review."),
+      acceptance: z.string().default("").describe("Acceptance criteria or reviewer questions."),
+      verification: z.string().default("").describe("Verification commands or checks to consider."),
+      dir: z.string().optional().describe("Working directory for the proposed review session.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ goal, risk, scope, acceptance, verification, dir }) => toolResult(success({
+    provider: "reasonix",
+    recommendedModel: "pro",
+    model: "deepseek-v4-pro",
+    reason: proReviewReason(risk),
+    startSession: {
+      provider: "reasonix",
+      approve: "manual",
+      model: "pro",
+      dir: dir ?? null
+    },
+    prompt: buildProReviewPrompt({ goal, risk, scope, acceptance, verification })
+  })));
 
   server.registerTool("worker_approve", {
     title: "TaskMarshal Approve Permission",
@@ -785,8 +813,41 @@ function summarizeClaudeTurn(turn) {
   };
 }
 
+function proReviewReason(risk) {
+  if (risk === "high") return "Use pro for high-risk review, architecture decisions, security-sensitive changes, tricky debugging, or final verification.";
+  if (risk === "medium") return "Use pro when a flash result is uncertain or the review can prevent expensive rework.";
+  return "Low-risk work usually stays on flash or Local mode; use pro only if the user explicitly wants a stronger second pass.";
+}
+
+function buildProReviewPrompt({ goal, risk, scope, acceptance, verification }) {
+  return `You are the second-pass reviewer. Codex is the architect and final decision maker.
+
+Goal:
+${goal}
+
+Risk:
+${risk}
+
+Scope:
+${scope || "Review only the files, diffs, or decisions Codex provides. Do not expand scope without saying why."}
+
+Rules:
+- Read-only review unless Codex explicitly asks for edits.
+- Focus on correctness, architecture risk, missed edge cases, security, data loss, regressions, and missing tests.
+- Do not approve the work just because it looks plausible.
+- Return findings first, ordered by severity, with file or command references when available.
+- Keep the response concise and actionable.
+
+Acceptance criteria:
+${acceptance || "Identify blocking issues, non-blocking risks, and whether the work is acceptable after Codex verification."}
+
+Verification to consider:
+${verification || "Use the verification evidence Codex provides; suggest focused additional checks only when needed."}
+`;
+}
+
 async function runCtl(args, { cwd } = {}) {
-  if (!existsSync(CTL)) throw new Error(`reasonixctl.js not found: ${CTL}`);
+  if (!existsSync(CTL)) throw new Error(`taskmarshalctl.js not found: ${CTL}`);
   const childCwd = cwd ? resolve(cwd) : ROOT;
   return runProcess(process.execPath, [CTL, ...args], { cwd: childCwd }).then((run) => {
     const parsed = parseJson(run.stdout);
@@ -799,7 +860,7 @@ async function runCtl(args, { cwd } = {}) {
     };
     if (run.exitCode !== 0) {
       result.ok = false;
-      result.error = run.stderr.trim() || run.stdout.trim() || `reasonixctl exited with code ${run.exitCode}`;
+      result.error = run.stderr.trim() || run.stdout.trim() || `taskmarshalctl exited with code ${run.exitCode}`;
     }
     return result;
   });
@@ -933,6 +994,10 @@ function actionAnnotations({ destructive = false, openWorld = false } = {}) {
     idempotentHint: false,
     openWorldHint: openWorld
   };
+}
+
+function truthyEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 }
 
 async function main() {
