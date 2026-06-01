@@ -15,7 +15,7 @@ delegation more controlled, verifiable, and reusable.
 - [x] Update README/docs to explain the lean Codex + structured worker protocol.
 - [x] Sync the installed local TaskMarshal skill after repo changes.
 - [x] Run local verification.
-- [ ] Push verified changes to GitHub.
+- [x] Push verified changes to GitHub.
 
 ## P0 - Token-Saving Protocol
 
@@ -42,7 +42,7 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add `maxChars` to observation tools.
   - Acceptance: long assistant text and large event tails are capped before
     entering Codex context.
-- [ ] Consider `worker_summarize_session`.
+- [x] Consider `worker_summarize_session`.
   - Acceptance: Codex can request an explicit compact session state without
     parsing JSONL event history.
 
@@ -76,7 +76,7 @@ delegation more controlled, verifiable, and reusable.
 
 ## P4 - Metrics And Feedback
 
-- [ ] Track lightweight task metrics.
+- [x] Track lightweight task metrics.
   - Suggested fields: provider, model, mode, elapsed time, approval count,
     files changed, verification result, redo count.
 - [ ] Use metrics to tune routing.

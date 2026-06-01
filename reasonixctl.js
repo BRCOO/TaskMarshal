@@ -43,6 +43,7 @@ function main() {
   if (cmd === "status") return statusSession(args);
   if (cmd === "send") return sendSession(args);
   if (cmd === "observe") return observeSession(args);
+  if (cmd === "summarize") return summarizeSession(args);
   if (cmd === "cancel") return postSessionCommand(args, "cancel");
   if (cmd === "approve") return permissionCommand(args, "approve");
   if (cmd === "deny") return permissionCommand(args, "deny");
@@ -132,6 +133,7 @@ async function startSession(args) {
   const metaPath = resolve(runDir, "session.json");
   const transcript = resolve(runDir, "transcript.jsonl");
   const events = resolve(runDir, "events.jsonl");
+  const metrics = resolve(runDir, "metrics.jsonl");
   const token = randomBytes(18).toString("hex");
   const baseMeta = {
     id,
@@ -147,7 +149,8 @@ async function startSession(args) {
     budget: opts.budget ?? null,
     sessionId: null,
     transcript,
-    events
+    events,
+    metrics
   };
   writeJson(metaPath, baseMeta);
 
@@ -160,7 +163,8 @@ async function startSession(args) {
     "--token", token,
     "--approve", opts.approve,
     "--transcript", transcript,
-    "--events", events
+    "--events", events,
+    "--metrics", metrics
   ];
   if (opts.yolo) childArgs.push("--yolo");
   if (opts.model) childArgs.push("--model", opts.model);
@@ -189,7 +193,8 @@ async function startSession(args) {
     preset: meta?.preset ?? null,
     budget: meta?.budget ?? null,
     transcript,
-    events
+    events,
+    metrics
   };
   output(payload);
 }
@@ -257,10 +262,22 @@ async function observeSession(args) {
   }));
 }
 
+async function summarizeSession(args) {
+  const { id, maxChars } = parseSummarizeArgs(args);
+  output(writeSessionSummary(id, { maxChars }));
+}
+
 async function postSessionCommand(args, command) {
   const id = requireSessionId(args);
   const meta = readSessionMeta(id);
+  const daemonStatus = command === "stop"
+    ? await daemonRequest(meta, "GET", "/status").catch(() => null)
+    : null;
   const result = await daemonRequest(meta, "POST", `/${command}`, {});
+  if (command === "stop") {
+    output({ ...result, summary: writeSessionSummary(id, { daemonStatus }) });
+    return;
+  }
   output(result);
 }
 
@@ -287,6 +304,13 @@ async function daemon(args) {
     assistantText: "",
     pendingPermission: null,
     permissionResolver: null,
+    metrics: {
+      permissionRequests: 0,
+      approvals: 0,
+      denials: 0,
+      autoPermissions: 0
+    },
+    currentTurnMetrics: null,
     turns: [],
     errors: []
   };
@@ -306,8 +330,13 @@ async function daemon(args) {
   });
   client.on("session/request_permission", (params) => {
     eventSink({ method: "session/request_permission", params });
+    state.metrics.permissionRequests += 1;
+    if (state.currentTurnMetrics) state.currentTurnMetrics.permissionRequests += 1;
     if (opts.approve !== "manual") {
       const optionId = choosePermissionOption(params, opts.approve);
+      eventSink({ method: "control/permission_auto", mode: opts.approve, selected: Boolean(optionId) });
+      state.metrics.autoPermissions += 1;
+      if (state.currentTurnMetrics) state.currentTurnMetrics.autoPermissions += 1;
       if (!optionId) return { outcome: { outcome: "cancelled" } };
       return { outcome: { outcome: "selected", optionId } };
     }
@@ -342,6 +371,12 @@ async function daemon(args) {
         state.currentTurnId = turnId;
         state.currentPrompt = body.text || "";
         state.assistantText = "";
+        state.currentTurnMetrics = {
+          permissionRequests: 0,
+          approvals: 0,
+          denials: 0,
+          autoPermissions: 0
+        };
         writeDaemonMeta(metaPath, opts, state);
         runTurn(client, opts, state, eventSink, metaPath, body.text || "", turnId).catch((err) => {
           state.errors.push({ ts: new Date().toISOString(), message: err.message });
@@ -373,6 +408,14 @@ async function daemon(args) {
         const optionId = body.action === "approve"
           ? choosePermissionOption(pending.params, "once")
           : choosePermissionOption(pending.params, "reject");
+        eventSink({ method: "control/permission", action: body.action, permissionId: pending.id });
+        if (body.action === "approve") {
+          state.metrics.approvals += 1;
+          if (state.currentTurnMetrics) state.currentTurnMetrics.approvals += 1;
+        } else {
+          state.metrics.denials += 1;
+          if (state.currentTurnMetrics) state.currentTurnMetrics.denials += 1;
+        }
         if (!optionId || body.action === "deny") resolver({ outcome: { outcome: "cancelled" } });
         else resolver({ outcome: { outcome: "selected", optionId } });
         writeDaemonMeta(metaPath, opts, state);
@@ -535,13 +578,14 @@ function parseDaemonArgs(args) {
     else if (a === "--approve") out.approve = args[++i];
     else if (a === "--transcript") out.transcript = resolve(args[++i]);
     else if (a === "--events") out.events = resolve(args[++i]);
+    else if (a === "--metrics") out.metrics = resolve(args[++i]);
     else if (a === "--model") out.model = args[++i];
     else if (a === "--preset") out.preset = args[++i];
     else if (a === "--budget") out.budget = args[++i];
     else if (a === "--yolo") out.yolo = true;
     else throw new Error(`Unknown daemon option: ${a}`);
   }
-  for (const key of ["id", "dir", "meta", "token", "approve", "transcript", "events"]) {
+  for (const key of ["id", "dir", "meta", "token", "approve", "transcript", "events", "metrics"]) {
     if (!out[key]) throw new Error(`daemon missing --${key}`);
   }
   validateApproveMode(out.approve, true);
@@ -575,6 +619,20 @@ function parseObserveArgs(args) {
     throw new Error("--max-chars must be a number >= 500");
   }
   return { id, tail, mode, maxChars };
+}
+
+function parseSummarizeArgs(args) {
+  const id = args[0];
+  if (!id) throw new Error("summarize requires SESSION_ID");
+  let maxChars = 6000;
+  for (let i = 1; i < args.length; i += 1) {
+    if (args[i] === "--max-chars") maxChars = Number(args[++i] || 6000);
+    else throw new Error(`Unknown summarize option: ${args[i]}`);
+  }
+  if (!Number.isFinite(maxChars) || maxChars < 500) {
+    throw new Error("--max-chars must be a number >= 500");
+  }
+  return { id, maxChars };
 }
 
 function requireSessionId(args) {
@@ -614,6 +672,7 @@ Usage:
   reasonixctl status SESSION_ID
   reasonixctl send SESSION_ID "prompt"
   reasonixctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N]
+  reasonixctl summarize SESSION_ID [--max-chars N]
   reasonixctl approve SESSION_ID
   reasonixctl deny SESSION_ID
   reasonixctl cancel SESSION_ID
@@ -656,6 +715,15 @@ function readSessionMeta(id) {
   const meta = readJsonLenient(metaPath);
   if (!meta) throw new Error(`Unknown session: ${id}`);
   return meta;
+}
+
+function writeSessionSummary(id, { maxChars = 6000, daemonStatus = null } = {}) {
+  const meta = readSessionMeta(id);
+  const events = readJsonl(meta.events);
+  const summary = buildReasonixSessionSummary({ meta, daemonStatus, events, maxChars });
+  const summaryPath = resolve(SESSION_DIR, id, "session-summary.json");
+  writeJson(summaryPath, summary);
+  return { ...summary, summaryPath };
 }
 
 function redactMeta(meta) {
@@ -734,24 +802,67 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
       startedAt,
       finishedAt: new Date().toISOString(),
       stopReason: result.stopReason,
+      promptChars: text.length,
       assistantText: state.assistantText.trim()
     };
+    const metric = buildTurnMetric({ opts, state, turn, ok: true });
     state.turns.push(turn);
     state.status = "ready";
     state.busy = false;
     state.currentTurnId = null;
     state.currentPrompt = null;
+    state.currentTurnMetrics = null;
     state.pendingPermission = null;
     state.permissionResolver = null;
+    appendJsonl(opts.metrics, metric);
     eventSink({ method: "control/turn_finished", turnId, stopReason: result.stopReason });
     writeDaemonMeta(metaPath, opts, state);
   } catch (err) {
+    const failedTurn = {
+      turnId,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      stopReason: "error",
+      promptChars: text.length,
+      assistantText: state.assistantText.trim(),
+      error: err.message
+    };
+    appendJsonl(opts.metrics, buildTurnMetric({ opts, state, turn: failedTurn, ok: false }));
     state.status = "ready";
     state.busy = false;
+    state.currentTurnMetrics = null;
     state.errors.push({ ts: new Date().toISOString(), turnId, message: err.message });
     eventSink({ method: "control/turn_error", turnId, error: err.message });
     writeDaemonMeta(metaPath, opts, state);
   }
+}
+
+function buildTurnMetric({ opts, state, turn, ok }) {
+  const turnMetrics = state.currentTurnMetrics ?? {};
+  const elapsedMs = turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : null;
+  return {
+    ts: turn.finishedAt,
+    provider: "reasonix",
+    session: opts.id,
+    model: opts.model ?? null,
+    preset: opts.preset ?? null,
+    budget: opts.budget ?? null,
+    approveMode: opts.approve,
+    turnId: turn.turnId,
+    ok,
+    stopReason: turn.stopReason,
+    elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
+    promptChars: turn.promptChars ?? 0,
+    assistantChars: String(turn.assistantText ?? "").length,
+    permissionRequests: turnMetrics.permissionRequests ?? 0,
+    approvals: turnMetrics.approvals ?? 0,
+    denials: turnMetrics.denials ?? 0,
+    autoPermissions: turnMetrics.autoPermissions ?? 0,
+    filesChanged: [],
+    verification: "unknown",
+    redoCount: 0,
+    error: turn.error ?? null
+  };
 }
 
 async function waitForReady(metaPath, timeoutMs) {
@@ -804,11 +915,93 @@ function readTailJsonl(path, count) {
   });
 }
 
+function readJsonl(path) {
+  if (!path) return [];
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { malformed: line };
+      }
+    });
+}
+
 function displayEvents(events) {
   return events.filter((event) => {
     if (event.type === "agent_thought_chunk") return false;
     return true;
   });
+}
+
+function buildReasonixSessionSummary({ meta, daemonStatus, events, maxChars }) {
+  const status = daemonStatus && daemonStatus.ok ? daemonStatus : null;
+  const metricsRecords = readJsonl(meta.metrics);
+  const turns = Array.isArray(status?.turns) && status.turns.length
+    ? status.turns
+    : [meta.lastTurn].filter(Boolean);
+  const permissionRequests = events.filter((event) => event.method === "session/request_permission").length;
+  const approvals = events.filter((event) => event.method === "control/permission" && event.action === "approve").length;
+  const denials = events.filter((event) => event.method === "control/permission" && event.action === "deny").length;
+  const autoPermissions = events.filter((event) => event.method === "control/permission_auto").length;
+  const errors = [
+    ...(Array.isArray(status?.errors) ? status.errors : []),
+    ...(Array.isArray(meta.errors) ? meta.errors : []),
+    ...events.filter((event) => event.method === "control/turn_error")
+  ].slice(-10);
+  const startedAt = meta.startedAt ?? turns[0]?.startedAt ?? null;
+  const finishedAt = turns[turns.length - 1]?.finishedAt ?? meta.updatedAt ?? null;
+  const elapsedMs = startedAt && finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : null;
+  const assistantText = turns.map((turn) => turn.assistantText || "").filter(Boolean).join("\n\n");
+  const lastTurn = turns[turns.length - 1] ?? null;
+  const summary = {
+    ok: true,
+    provider: "reasonix",
+    id: meta.id,
+    generatedAt: new Date().toISOString(),
+    status: status?.status ?? meta.status ?? "unknown",
+    dir: meta.dir,
+    model: meta.model ?? null,
+    preset: meta.preset ?? null,
+    budget: meta.budget ?? null,
+    sessionId: meta.sessionId ?? null,
+    startedAt,
+    finishedAt,
+    metrics: {
+      provider: "reasonix",
+      model: meta.model ?? null,
+      approveMode: meta.approve ?? null,
+      elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
+      turnCount: turns.length,
+      permissionRequests,
+      approvals,
+      denials,
+      autoPermissions,
+      errorCount: errors.length,
+      promptChars: metricsRecords.length ? sumBy(metricsRecords, "promptChars") : sumBy(turns, "promptChars"),
+      assistantChars: metricsRecords.length ? sumBy(metricsRecords, "assistantChars") : assistantText.length,
+      recordedTurns: metricsRecords.length,
+      filesChanged: [],
+      verification: "unknown",
+      redoCount: 0
+    },
+    lastTurn: summarizeTurn(lastTurn),
+    assistantTextPreview: limitText(assistantText || meta.assistantTextPreview || "", maxChars),
+    pendingPermission: status?.pendingPermission ?? meta.pendingPermission ?? null,
+    errors
+  };
+  return compactTextFields(summary, maxChars);
+}
+
+function sumBy(items, key) {
+  return items.reduce((total, item) => {
+    const value = Number(item?.[key]);
+    return Number.isFinite(value) ? total + value : total;
+  }, 0);
 }
 
 function formatObservation({ id, mode, maxChars, status, events, meta }) {

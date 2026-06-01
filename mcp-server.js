@@ -221,6 +221,20 @@ function registerWorkerTools() {
     "claude-code": () => claudeObserve({ id, tail, mode, maxChars })
   }));
 
+  server.registerTool("worker_summarize_session", {
+    title: "TaskMarshal Summarize Worker Session",
+    description: "Return a compact session summary and lightweight metrics without replaying full event logs.",
+    inputSchema: {
+      provider: Provider.default("reasonix").describe("Worker provider to inspect."),
+      id: z.string().min(1).describe("Worker session id."),
+      maxChars: z.number().int().min(500).max(50000).default(6000).describe("Approximate maximum characters for large text fields.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ provider, id, maxChars }) => routeProvider(provider, {
+    reasonix: () => runCtl(["summarize", id, "--max-chars", String(maxChars)]),
+    "claude-code": () => claudeSummarizeSession({ id, maxChars })
+  }));
+
   server.registerTool("worker_approve", {
     title: "TaskMarshal Approve Permission",
     description: "Approve the currently pending permission request in a manual worker session.",
@@ -365,6 +379,18 @@ function registerReasonixCompatTools() {
     annotations: readOnlyAnnotations()
   }, async ({ id, tail, mode, maxChars }) => {
     return toolResult(await runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars)]));
+  });
+
+  server.registerTool("reasonix_summarize_session", {
+    title: "Reasonix Summarize Session",
+    description: "Legacy compatibility alias for worker_summarize_session with provider='reasonix'. Prefer worker_summarize_session.",
+    inputSchema: {
+      id: z.string().min(1).describe("Reasonix session id."),
+      maxChars: z.number().int().min(500).max(50000).default(6000).describe("Approximate maximum characters for large text fields.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ id, maxChars }) => {
+    return toolResult(await runCtl(["summarize", id, "--max-chars", String(maxChars)]));
   });
 
   server.registerTool("reasonix_approve", {
@@ -585,6 +611,60 @@ function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
     mode,
     status: publicMeta,
     events
+  }, maxChars));
+}
+
+function claudeSummarizeSession({ id, maxChars = 6000 }) {
+  const meta = readClaudeMeta(id);
+  const events = readTailJsonl(meta.events, 1000);
+  const turns = events
+    .filter((event) => event.method === "control/turn_finished" && event.turn)
+    .map((event) => event.turn);
+  const allTurns = turns.length ? turns : [meta.lastTurn].filter(Boolean);
+  const errors = events
+    .filter((event) => event.method === "control/turn_error")
+    .map((event) => ({ ts: event.ts, error: event.error }))
+    .slice(-10);
+  const startedAt = meta.startedAt ?? allTurns[0]?.startedAt ?? null;
+  const finishedAt = allTurns[allTurns.length - 1]?.finishedAt ?? meta.updatedAt ?? null;
+  const elapsedMs = startedAt && finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : null;
+  const assistantText = allTurns.map((turn) => turn.assistantText || "").filter(Boolean).join("\n\n");
+  return success(compactTextFields({
+    ok: true,
+    provider: "claude-code",
+    id,
+    generatedAt: new Date().toISOString(),
+    status: meta.status,
+    dir: meta.dir,
+    model: meta.model ?? null,
+    budget: meta.budget ?? null,
+    claudeSessionId: meta.claudeSessionId ?? null,
+    startedAt,
+    finishedAt,
+    metrics: {
+      provider: "claude-code",
+      model: meta.model ?? null,
+      approveMode: meta.approve ?? null,
+      elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
+      turnCount: allTurns.length,
+      permissionRequests: null,
+      approvals: null,
+      denials: null,
+      autoPermissions: null,
+      errorCount: errors.length,
+      promptChars: events
+        .filter((event) => event.method === "control/send")
+        .reduce((total, event) => total + String(event.prompt || "").length, 0),
+      assistantChars: assistantText.length,
+      totalCostUsd: allTurns.reduce((total, turn) => total + (Number(turn.totalCostUsd) || 0), 0),
+      filesChanged: [],
+      verification: "unknown",
+      redoCount: 0
+    },
+    lastTurn: summarizeClaudeTurn(allTurns[allTurns.length - 1]),
+    assistantTextPreview: assistantText,
+    warnings: meta.warnings ?? [],
+    errors
   }, maxChars));
 }
 

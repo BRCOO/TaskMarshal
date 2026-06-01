@@ -112,6 +112,7 @@ Prefer provider-neutral tools:
 - `worker_start_session`
 - `worker_send_task`
 - `worker_observe`
+- `worker_summarize_session`
 - `worker_approve`
 - `worker_deny`
 - `worker_cancel`
@@ -124,6 +125,7 @@ Use persistent sessions:
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
 worker_send_task(provider: "reasonix", id: "audit", prompt: "<bounded task spec>")
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
+worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
 ```
 
 Use `worker_observe(mode: "events")` only when compact summary/final/permission

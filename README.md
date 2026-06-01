@@ -54,6 +54,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Manual approval gate for worker permissions
 - Event observation through JSONL session logs
 - Compact observation modes for token-sensitive supervision
+- Session summaries with lightweight task metrics
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
 - Secret-free repository: no API keys, transcripts, or local state
@@ -196,6 +197,7 @@ Provider-neutral tools:
 | `worker_status` | Inspect one worker session. |
 | `worker_send_task` | Send a bounded task to a session. |
 | `worker_observe` | Read recent worker events. |
+| `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_approve` | Approve a pending permission request. |
 | `worker_deny` | Deny a pending permission request. |
 | `worker_cancel` | Cancel the current worker turn. |
@@ -241,6 +243,7 @@ reasonix_list_sessions
 reasonix_status
 reasonix_send_task
 reasonix_observe
+reasonix_summarize_session
 reasonix_approve
 reasonix_deny
 reasonix_cancel
@@ -266,6 +269,7 @@ node reasonixctl.js start --id architect --dir C:\\path\\to\\repo --approve manu
 node reasonixctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
 node reasonixctl.js send architect "Analyze the repo. Do not edit files."
 node reasonixctl.js observe architect --mode summary --max-chars 4000
+node reasonixctl.js summarize architect --max-chars 6000
 node reasonixctl.js approve architect
 node reasonixctl.js deny architect
 node reasonixctl.js stop architect
@@ -292,8 +296,16 @@ The economical TaskMarshal loop is:
 2. Codex sends a compact task packet instead of the full conversation.
 3. Worker returns a short plan before edits for Full Marshal tasks.
 4. Codex observes with `mode: "summary"` or `mode: "permission"`.
-5. Worker returns a diff-oriented yield summary.
-6. Codex reviews the changed files and verifies locally.
+5. Codex asks `worker_summarize_session` for a compact digest and metrics when
+   the worker finishes.
+6. Worker returns a diff-oriented yield summary.
+7. Codex reviews the changed files and verifies locally.
+
+Reasonix session summaries are also written to
+`~/.reasonixctl/sessions/<id>/session-summary.json`. New persistent Reasonix
+turns append lightweight metrics to `metrics.jsonl`, including model, elapsed
+time, prompt/assistant character counts, permission counts, errors, and
+verification placeholders for future routing feedback.
 
 Templates:
 
@@ -372,7 +384,7 @@ The grep may match documentation or source identifiers. Review matches before co
 - Claude Code CLI provider
 - Provider capability scoring
 - Task spec persistence
-- Better transcript summarization
+- Better transcript summarization and metrics-based routing
 - Packaged Codex plugin
 
 ## Contributing

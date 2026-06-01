@@ -45,6 +45,7 @@ Use compact observation for routine supervision:
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
 worker_observe(provider: "reasonix", id: "audit", mode: "permission", maxChars: 2000)
 worker_observe(provider: "reasonix", id: "audit", mode: "final", maxChars: 6000)
+worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
 ```
 
 Use full event observation only when compact state is not enough:
@@ -59,6 +60,24 @@ Workers should return `examples/worker-yield-summary.md`, not long prose. Codex
 can then decide whether to inspect diffs, ask for a narrow redo, run tests, or
 finish locally.
 
+## Session Metrics
+
+Use `worker_summarize_session` after a worker turn or before final review. The
+summary returns a compact digest plus lightweight metrics:
+
+- provider and model
+- elapsed time
+- turn count
+- permission requests, approvals, denials, and auto-permissions
+- prompt and assistant character counts
+- error count
+- verification and changed-file placeholders
+
+Reasonix writes `session-summary.json` when summarized or stopped. New
+persistent Reasonix turns also append `metrics.jsonl` in the session directory.
+These records are intentionally small and secret-free, and can later drive
+Local / flash / pro routing decisions.
+
 ## Model Policy
 
 - Use `flash` for exploration, routine implementation, long low-cost sessions,
@@ -68,4 +87,3 @@ finish locally.
 
 The economical default is Codex plans, `flash` executes or audits, and `pro`
 reviews only when risk justifies it.
-
