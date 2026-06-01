@@ -91,6 +91,8 @@ Choose the smallest mode that fits.
 
 **Full Marshal Mode:** For complex tasks. Codex inspects first, writes a task spec, dispatches a worker, gates permissions, reviews diffs, runs tests, and accepts or rejects the work.
 
+**Async Audit Mode:** For long read-only audits, technical research, broad repo inspection, or any task likely to exceed one MCP tool-call window. Start a persistent worker session, send the task, observe opportunistically, and keep local progress moving instead of waiting on `worker_ask`.
+
 ## Provider Choice
 
 - Default to `reasonix` for supervised execution with external permission gating.
@@ -119,6 +121,14 @@ Choose the smallest mode that fits.
 7. Deny or cancel requests that exceed scope, touch secrets, perform destructive git commands, install unrelated dependencies, or change unrelated files.
 8. Review the resulting diff yourself. Run appropriate tests or checks locally.
 9. Accept, request a narrow redo, or finish the work yourself.
+
+## Avoiding Worker Timeouts
+
+- Do not use `worker_ask` or `reasonix_ask` for broad audits, multi-file repo inspection, long technical research, or anything likely to take more than about 60 seconds.
+- For long read-only work, use `worker_start_session` with `provider: "reasonix"` and `approve: "manual"`, then `worker_send_task`, then `worker_observe`.
+- While the worker runs, continue useful local work. Treat the worker result as a later second pass, not a blocking dependency.
+- If the worker is slow, stuck, or offline, do not wait indefinitely. Continue locally, then observe or stop the session later.
+- For strictly no-tool analysis where the prompt already contains all needed context, `worker_ask` is acceptable.
 
 ## Task Prompt Template
 
@@ -166,6 +176,7 @@ If `taskmarshal-mcp` tools are available, prefer:
 - `worker_start_session` with `provider: "claude-code"` and `approve: "cancel"` for Claude Code plan-mode sessions.
 - `worker_send_task` for bounded prompts.
 - `worker_observe` while work is running.
+- `worker_ask` only for short one-shot prompts; avoid it for long read-only audits because it blocks until the worker finishes.
 - `worker_approve` only for expected, scoped permission requests.
 - `worker_deny` or `worker_cancel` for unsafe or out-of-scope requests.
 - `worker_stop` when the worker session is no longer needed.

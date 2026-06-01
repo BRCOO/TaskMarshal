@@ -208,6 +208,16 @@ For Reasonix, `worker_ask` and `worker_start_session` accept:
 
 Use `flash` for quick exploration, routine implementation, and low-cost long sessions. Use `pro` for hard architecture, tricky debugging, final review, or higher-stakes verification.
 
+For broad audits or slow investigations, avoid `worker_ask` / `reasonix_ask`. Those one-shot tools block until the worker finishes and can hit the host MCP timeout. Use persistent sessions instead:
+
+```text
+worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
+worker_send_task(provider: "reasonix", id: "audit", prompt: "Read-only audit ...")
+worker_observe(provider: "reasonix", id: "audit", tail: 80)
+```
+
+Codex should continue local work while the worker runs and treat the result as a later second pass.
+
 Reasonix compatibility aliases are also available:
 
 ```text

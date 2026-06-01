@@ -112,7 +112,7 @@ function registerWorkerTools() {
 
   server.registerTool("worker_ask", {
     title: "TaskMarshal One-Shot Ask",
-    description: "Run a single prompt with a worker provider. Prefer approve='cancel' for read-only analysis.",
+    description: "Run a short single prompt with a worker provider. Avoid for long repo audits or slow investigations; use worker_start_session, worker_send_task, and worker_observe instead.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to use."),
       prompt: z.string().min(1).describe("Prompt to send to the worker."),
@@ -280,7 +280,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_ask", {
     title: "Reasonix One-Shot Ask",
-    description: "Compatibility alias for worker_ask with provider='reasonix'.",
+    description: "Compatibility alias for worker_ask with provider='reasonix'. Use only for short one-shot prompts; prefer reasonix_start_session plus reasonix_send_task for long audits.",
     inputSchema: {
       prompt: z.string().min(1).describe("Prompt to send to Reasonix."),
       dir: z.string().optional().describe("Working directory. Defaults to the MCP server directory."),

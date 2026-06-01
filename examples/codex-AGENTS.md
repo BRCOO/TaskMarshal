@@ -26,6 +26,9 @@ When using Reasonix:
 - Use `model: "pro"` for architecture, tricky debugging, final review,
   higher-stakes verification, security-sensitive changes, or when a `flash`
   result is uncertain.
+- For broad audits, technical research, or slow repo inspection, do not use
+  `worker_ask` / `reasonix_ask`; start a persistent session, send the task,
+  observe opportunistically, and continue local progress.
 
 Show the routing result near the start of technical turns using one concise
 line:
