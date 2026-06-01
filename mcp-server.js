@@ -20,6 +20,7 @@ const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "cl
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
 const AskApproveMode = z.enum(["cancel", "once", "always", "reject"]);
+const ObserveMode = z.enum(["events", "summary", "final", "permission"]);
 const REASONIX_MODEL_DESCRIPTION = "Optional Reasonix model override. Accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro.";
 
 const providers = [
@@ -206,16 +207,18 @@ function registerWorkerTools() {
 
   server.registerTool("worker_observe", {
     title: "TaskMarshal Observe Worker",
-    description: "Read recent events from a persistent worker session, including assistant chunks and permission prompts.",
+    description: "Read recent events or compact state from a persistent worker session. Use compact modes to save Codex context.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to inspect."),
       id: z.string().min(1).describe("Worker session id."),
-      tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return.")
+      tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
+      mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
+      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ provider, id, tail }) => routeProvider(provider, {
-    reasonix: () => runCtl(["observe", id, "--tail", String(tail)]),
-    "claude-code": () => claudeObserve({ id, tail })
+  }, async ({ provider, id, tail, mode, maxChars }) => routeProvider(provider, {
+    reasonix: () => runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars)]),
+    "claude-code": () => claudeObserve({ id, tail, mode, maxChars })
   }));
 
   server.registerTool("worker_approve", {
@@ -274,13 +277,13 @@ function registerWorkerTools() {
 function registerReasonixCompatTools() {
   server.registerTool("reasonix_doctor", {
     title: "Reasonix Doctor",
-    description: "Compatibility alias for worker_doctor with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_doctor with provider='reasonix'. Prefer worker_doctor.",
     annotations: readOnlyAnnotations()
   }, async () => toolResult(await runCtl(["doctor"])));
 
   server.registerTool("reasonix_ask", {
     title: "Reasonix One-Shot Ask",
-    description: "Compatibility alias for worker_ask with provider='reasonix'. Use only for short one-shot prompts; prefer reasonix_start_session plus reasonix_send_task for long audits.",
+    description: "Legacy compatibility alias for worker_ask with provider='reasonix'. Prefer worker_ask; use only for short one-shot prompts.",
     inputSchema: {
       prompt: z.string().min(1).describe("Prompt to send to Reasonix."),
       dir: z.string().optional().describe("Working directory. Defaults to the MCP server directory."),
@@ -303,7 +306,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_start_session", {
     title: "Reasonix Start Session",
-    description: "Compatibility alias for worker_start_session with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_start_session with provider='reasonix'. Prefer worker_start_session.",
     inputSchema: {
       id: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional().describe("Optional stable session id."),
       dir: z.string().optional().describe("Working directory for Reasonix. Defaults to the MCP server directory."),
@@ -327,13 +330,13 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_list_sessions", {
     title: "Reasonix List Sessions",
-    description: "Compatibility alias for worker_list_sessions with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_list_sessions with provider='reasonix'. Prefer worker_list_sessions.",
     annotations: readOnlyAnnotations()
   }, async () => toolResult(await runCtl(["list"])));
 
   server.registerTool("reasonix_status", {
     title: "Reasonix Session Status",
-    description: "Compatibility alias for worker_status with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_status with provider='reasonix'. Prefer worker_status.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id.")
     },
@@ -342,7 +345,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_send_task", {
     title: "Reasonix Send Task",
-    description: "Compatibility alias for worker_send_task with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_send_task with provider='reasonix'. Prefer worker_send_task.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id."),
       prompt: z.string().min(1).describe("Task prompt for Reasonix.")
@@ -352,17 +355,21 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_observe", {
     title: "Reasonix Observe",
-    description: "Compatibility alias for worker_observe with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_observe with provider='reasonix'. Prefer worker_observe.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id."),
-      tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return.")
+      tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
+      mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
+      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ id, tail }) => toolResult(await runCtl(["observe", id, "--tail", String(tail)])));
+  }, async ({ id, tail, mode, maxChars }) => {
+    return toolResult(await runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars)]));
+  });
 
   server.registerTool("reasonix_approve", {
     title: "Reasonix Approve Permission",
-    description: "Compatibility alias for worker_approve with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_approve with provider='reasonix'. Prefer worker_approve.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id.")
     },
@@ -371,7 +378,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_deny", {
     title: "Reasonix Deny Permission",
-    description: "Compatibility alias for worker_deny with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_deny with provider='reasonix'. Prefer worker_deny.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id.")
     },
@@ -380,7 +387,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_cancel", {
     title: "Reasonix Cancel Turn",
-    description: "Compatibility alias for worker_cancel with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_cancel with provider='reasonix'. Prefer worker_cancel.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id.")
     },
@@ -389,7 +396,7 @@ function registerReasonixCompatTools() {
 
   server.registerTool("reasonix_stop", {
     title: "Reasonix Stop Session",
-    description: "Compatibility alias for worker_stop with provider='reasonix'.",
+    description: "Legacy compatibility alias for worker_stop with provider='reasonix'. Prefer worker_stop.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id.")
     },
@@ -535,14 +542,50 @@ async function claudeSendTask({ id, prompt }) {
   return success({ provider: "claude-code", id, status: "ready", turn, claudeSessionId: meta.claudeSessionId });
 }
 
-function claudeObserve({ id, tail }) {
+function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
   const meta = readClaudeMeta(id);
-  return success({
+  const publicMeta = compactClaudeMeta(meta);
+  const events = readTailJsonl(meta.events, tail);
+  if (mode === "summary") {
+    return success(compactTextFields({
+      provider: "claude-code",
+      id,
+      mode,
+      status: publicMeta,
+      lastTurn: summarizeClaudeTurn(meta.lastTurn),
+      eventCount: events.length,
+      warnings: meta.warnings ?? []
+    }, maxChars));
+  }
+  if (mode === "final") {
+    return success(compactTextFields({
+      provider: "claude-code",
+      id,
+      mode,
+      status: publicMeta,
+      final: meta.lastTurn?.assistantText ?? null,
+      lastTurn: summarizeClaudeTurn(meta.lastTurn)
+    }, maxChars));
+  }
+  if (mode === "permission") {
+    return success({
+      provider: "claude-code",
+      id,
+      mode,
+      status: publicMeta,
+      pendingPermission: null,
+      warnings: [
+        "Claude Code does not expose external permission prompts through TaskMarshal."
+      ]
+    });
+  }
+  return success(compactTextFields({
     provider: "claude-code",
     id,
-    status: publicClaudeMeta(meta),
-    events: readTailJsonl(meta.events, tail)
-  });
+    mode,
+    status: publicMeta,
+    events
+  }, maxChars));
 }
 
 function claudeStop(id) {
@@ -625,6 +668,40 @@ function publicClaudeMeta(meta) {
     lastTurn: meta.lastTurn ?? null,
     events: meta.events,
     warnings: meta.warnings ?? []
+  };
+}
+
+function compactClaudeMeta(meta) {
+  return {
+    provider: "claude-code",
+    id: meta.id,
+    status: meta.status,
+    alive: false,
+    dir: meta.dir,
+    approve: meta.approve,
+    model: meta.model,
+    budget: meta.budget,
+    yolo: meta.yolo,
+    claudeSessionId: meta.claudeSessionId,
+    startedAt: meta.startedAt,
+    updatedAt: meta.updatedAt,
+    turnCount: meta.turnCount ?? 0,
+    lastTurn: summarizeClaudeTurn(meta.lastTurn),
+    warnings: meta.warnings ?? []
+  };
+}
+
+function summarizeClaudeTurn(turn) {
+  if (!turn || typeof turn !== "object") return turn ?? null;
+  return {
+    turnId: turn.turnId,
+    startedAt: turn.startedAt,
+    finishedAt: turn.finishedAt,
+    ok: turn.ok,
+    stopReason: turn.stopReason,
+    sessionId: turn.sessionId,
+    totalCostUsd: turn.totalCostUsd,
+    error: turn.error
   };
 }
 
@@ -717,6 +794,21 @@ function readTailJsonl(path, count) {
         return { malformed: line };
       }
     });
+}
+
+function compactTextFields(value, maxChars) {
+  if (typeof value === "string") return limitText(value, maxChars);
+  if (Array.isArray(value)) return value.map((item) => compactTextFields(item, maxChars));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, compactTextFields(entry, maxChars)])
+  );
+}
+
+function limitText(text, maxChars) {
+  if (!Number.isFinite(maxChars) || text.length <= maxChars) return text;
+  const omitted = text.length - maxChars;
+  return `${text.slice(0, maxChars)}\n[truncated ${omitted} chars]`;
 }
 
 function toolResult(result) {

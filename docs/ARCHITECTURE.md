@@ -31,6 +31,7 @@ It chooses between Local Mode, Light Mode, and Full Marshal Mode.
 ```text
 worker_list_providers
 worker_doctor
+worker_ask
 worker_start_session
 worker_send_task
 worker_observe
@@ -42,6 +43,17 @@ worker_stop
 
 Reasonix aliases are kept for compatibility but should not be the primary API for new providers.
 
+`worker_observe` supports compact modes so Codex can supervise workers without
+loading full event logs:
+
+- `summary`: session state, last turn, pending permission, recent event types.
+- `final`: final assistant text or latest assistant preview.
+- `permission`: pending permission state only.
+- `events`: recent raw events for debugging.
+
+Use `summary` as the default during long worker runs and reserve `events` for
+debugging TaskMarshal or provider adapters.
+
 ## Provider Adapters
 
 `reasonixctl.js` runs `reasonix acp`, speaks NDJSON JSON-RPC through `lib/acp-client.js`, and keeps persistent session daemons under the user's home directory.
@@ -49,3 +61,13 @@ Reasonix aliases are kept for compatibility but should not be the primary API fo
 The Claude Code provider uses `claude -p --output-format json` and records logical sessions under `~/.taskmarshal/providers/claude-code/sessions`. Claude Code permissions stay inside Claude Code; TaskMarshal cannot externally approve or deny Claude Code permission prompts.
 
 No provider API keys are stored in this repository. Reasonix reads its own local config from `~/.reasonix/config.json`; Claude Code uses its own local authentication.
+
+## Token-Efficient Protocol
+
+TaskMarshal should keep Codex context small:
+
+1. The Skill performs only routing and points to reusable templates.
+2. Codex sends `examples/task-spec.yaml` instead of a chat transcript.
+3. Workers return `examples/worker-yield-summary.md`.
+4. Workers run `examples/worker-self-review.md` before handoff.
+5. Codex uses compact observe modes unless full event history is required.

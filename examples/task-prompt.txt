@@ -21,3 +21,7 @@ Acceptance criteria:
 
 Verification:
 - Run the exact commands Codex expects, or say read-only if none.
+
+Handoff:
+- Return a compact yield summary using examples/worker-yield-summary.md.
+- Run the self-review checklist in examples/worker-self-review.md before handoff.

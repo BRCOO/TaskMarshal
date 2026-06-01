@@ -238,7 +238,7 @@ async function sendSession(args) {
 }
 
 async function observeSession(args) {
-  const { id, tail } = parseObserveArgs(args);
+  const { id, tail, mode, maxChars } = parseObserveArgs(args);
   const meta = readSessionMeta(id);
   const lines = readTailJsonl(meta.events, tail);
   let daemonStatus = null;
@@ -247,7 +247,14 @@ async function observeSession(args) {
   } catch {
     daemonStatus = { ok: false, status: "offline" };
   }
-  output({ ok: true, id, status: daemonStatus, events: displayEvents(lines) });
+  output(formatObservation({
+    id,
+    mode,
+    maxChars,
+    status: daemonStatus,
+    events: displayEvents(lines),
+    meta
+  }));
 }
 
 async function postSessionCommand(args, command) {
@@ -553,11 +560,21 @@ function parseObserveArgs(args) {
   const id = args[0];
   if (!id) throw new Error("observe requires SESSION_ID");
   let tail = 40;
+  let mode = "events";
+  let maxChars = 12000;
   for (let i = 1; i < args.length; i += 1) {
     if (args[i] === "--tail") tail = Number(args[++i] || 40);
+    else if (args[i] === "--mode") mode = args[++i] || "events";
+    else if (args[i] === "--max-chars") maxChars = Number(args[++i] || 12000);
     else throw new Error(`Unknown observe option: ${args[i]}`);
   }
-  return { id, tail };
+  if (!["events", "summary", "final", "permission"].includes(mode)) {
+    throw new Error("--mode must be one of: events, summary, final, permission");
+  }
+  if (!Number.isFinite(maxChars) || maxChars < 500) {
+    throw new Error("--max-chars must be a number >= 500");
+  }
+  return { id, tail, mode, maxChars };
 }
 
 function requireSessionId(args) {
@@ -596,7 +613,7 @@ Usage:
   reasonixctl list
   reasonixctl status SESSION_ID
   reasonixctl send SESSION_ID "prompt"
-  reasonixctl observe SESSION_ID [--tail N]
+  reasonixctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N]
   reasonixctl approve SESSION_ID
   reasonixctl deny SESSION_ID
   reasonixctl cancel SESSION_ID
@@ -792,6 +809,96 @@ function displayEvents(events) {
     if (event.type === "agent_thought_chunk") return false;
     return true;
   });
+}
+
+function formatObservation({ id, mode, maxChars, status, events, meta }) {
+  const safeStatus = compactSessionStatus(status, maxChars);
+  const base = {
+    ok: true,
+    id,
+    mode,
+    status: safeStatus
+  };
+  if (mode === "summary") {
+    return compactTextFields({
+      ...base,
+      eventCount: events.length,
+      recentEventTypes: events.slice(-10).map((event) => event.type || event.method || "unknown"),
+      lastTurn: summarizeTurn(status?.turns?.[status.turns.length - 1] ?? status?.lastTurn ?? meta.lastTurn ?? null),
+      assistantTextPreview: status?.assistantTextPreview ?? meta.assistantTextPreview ?? null,
+      pendingPermission: status?.pendingPermission ?? null,
+      errors: status?.errors ?? meta.errors ?? []
+    }, maxChars);
+  }
+  if (mode === "final") {
+    const lastTurn = status?.turns?.[status.turns.length - 1] ?? status?.lastTurn ?? meta.lastTurn ?? null;
+    return compactTextFields({
+      ...base,
+      lastTurn: summarizeTurn(lastTurn),
+      final: lastTurn?.assistantText ?? status?.assistantTextPreview ?? meta.assistantTextPreview ?? null
+    }, maxChars);
+  }
+  if (mode === "permission") {
+    return compactTextFields({
+      ...base,
+      pendingPermission: status?.pendingPermission ?? null,
+      busy: status?.busy ?? null,
+      currentTurnId: status?.currentTurnId ?? null
+    }, maxChars);
+  }
+  return compactTextFields({
+    ...base,
+    events
+  }, maxChars);
+}
+
+function compactSessionStatus(status, maxChars) {
+  if (!status || typeof status !== "object") return status;
+  return compactTextFields({
+    ok: status.ok,
+    id: status.id,
+    status: status.status,
+    busy: status.busy,
+    pid: status.pid,
+    port: status.port,
+    dir: status.dir,
+    approve: status.approve,
+    model: status.model,
+    preset: status.preset,
+    budget: status.budget,
+    sessionId: status.sessionId,
+    currentTurnId: status.currentTurnId,
+    pendingPermission: status.pendingPermission ?? null,
+    turnCount: Array.isArray(status.turns) ? status.turns.length : undefined,
+    errors: status.errors ?? []
+  }, maxChars);
+}
+
+function summarizeTurn(turn) {
+  if (!turn || typeof turn !== "object") return turn ?? null;
+  return {
+    turnId: turn.turnId,
+    startedAt: turn.startedAt,
+    finishedAt: turn.finishedAt,
+    stopReason: turn.stopReason,
+    ok: turn.ok,
+    error: turn.error
+  };
+}
+
+function compactTextFields(value, maxChars) {
+  if (typeof value === "string") return limitText(value, maxChars);
+  if (Array.isArray(value)) return value.map((item) => compactTextFields(item, maxChars));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, compactTextFields(entry, maxChars)])
+  );
+}
+
+function limitText(text, maxChars) {
+  if (!Number.isFinite(maxChars) || text.length <= maxChars) return text;
+  const omitted = text.length - maxChars;
+  return `${text.slice(0, maxChars)}\n[truncated ${omitted} chars]`;
 }
 
 function processAlive(pid) {

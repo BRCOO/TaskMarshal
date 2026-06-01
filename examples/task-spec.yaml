@@ -1,0 +1,60 @@
+# TaskMarshal TaskSpec v1
+# Codex writes this compact packet before delegating work to a local worker.
+
+version: 1
+mode: light # local | light | full | audit
+provider: reasonix
+model: flash # flash | pro | provider-specific id
+
+goal: >
+  One concrete outcome the worker should produce.
+
+workdir: C:\path\to\repo
+
+scope:
+  allowed_files:
+    - src/example.ts
+    - tests/example.test.ts
+  allowed_commands:
+    - npm test
+    - npm run check
+  forbidden_actions:
+    - Do not print, copy, or modify secrets.
+    - Do not run destructive git commands.
+    - Do not install dependencies unless Codex explicitly approves.
+    - Do not change unrelated files.
+
+context:
+  summary: >
+    Short facts Codex already knows. Do not paste the full conversation or
+    whole files unless the worker needs them.
+  references:
+    - README.md
+    - docs/ARCHITECTURE.md
+
+plan_gate:
+  required: true
+  instruction: >
+    Return a short plan first. Wait for Codex approval before editing files
+    unless this task is marked read_only.
+
+acceptance_criteria:
+  - The change satisfies the user-visible behavior.
+  - Existing tests still pass.
+  - The worker returns a yield summary using examples/worker-yield-summary.md.
+
+verification:
+  commands:
+    - npm run check
+    - npm run mcp:smoke
+  read_only: false
+
+budget:
+  max_minutes: 15
+  max_turns: 3
+  observe_mode: summary
+  max_observe_chars: 4000
+
+output_format:
+  use_template: examples/worker-yield-summary.md
+

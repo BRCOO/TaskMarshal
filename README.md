@@ -53,7 +53,9 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Claude Code one-shot and resumable logical sessions
 - Manual approval gate for worker permissions
 - Event observation through JSONL session logs
+- Compact observation modes for token-sensitive supervision
 - Codex Skill for autonomous delegation decisions
+- TaskSpec and worker yield templates for bounded delegation
 - Secret-free repository: no API keys, transcripts, or local state
 
 ## Quickstart
@@ -213,10 +215,21 @@ For broad audits or slow investigations, avoid `worker_ask` / `reasonix_ask`. Th
 ```text
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
 worker_send_task(provider: "reasonix", id: "audit", prompt: "Read-only audit ...")
-worker_observe(provider: "reasonix", id: "audit", tail: 80)
+worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
 ```
 
 Codex should continue local work while the worker runs and treat the result as a later second pass.
+
+Observation modes:
+
+| Mode | Purpose |
+|---|---|
+| `summary` | Compact session state, last turn, pending permission, and recent event types. |
+| `final` | Final assistant text or latest assistant preview. |
+| `permission` | Pending permission state only. |
+| `events` | Full recent event tail for debugging worker behavior. |
+
+Use `maxChars` to cap large text fields before they enter Codex context.
 
 Reasonix compatibility aliases are also available:
 
@@ -252,7 +265,7 @@ Persistent session:
 node reasonixctl.js start --id architect --dir C:\\path\\to\\repo --approve manual
 node reasonixctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
 node reasonixctl.js send architect "Analyze the repo. Do not edit files."
-node reasonixctl.js observe architect --tail 80
+node reasonixctl.js observe architect --mode summary --max-chars 4000
 node reasonixctl.js approve architect
 node reasonixctl.js deny architect
 node reasonixctl.js stop architect
@@ -270,6 +283,26 @@ worker_observe(provider: "claude-code", id: "claude-review", tail: 20)
 ```
 
 Claude Code does not expose an external permission callback to TaskMarshal. `worker_approve`, `worker_deny`, and `worker_cancel` return unsupported for `claude-code`; use Claude Code permission modes for safety.
+
+## Token-Efficient Delegation
+
+The economical TaskMarshal loop is:
+
+1. Codex decides Local, Light, or Full Marshal.
+2. Codex sends a compact task packet instead of the full conversation.
+3. Worker returns a short plan before edits for Full Marshal tasks.
+4. Codex observes with `mode: "summary"` or `mode: "permission"`.
+5. Worker returns a diff-oriented yield summary.
+6. Codex reviews the changed files and verifies locally.
+
+Templates:
+
+| Template | Purpose |
+|---|---|
+| `examples/task-spec.yaml` | Structured delegation packet. |
+| `examples/worker-yield-summary.md` | Compact worker handoff format. |
+| `examples/worker-self-review.md` | Worker pre-handoff checklist. |
+| `docs/ORCHESTRATION_GUIDE.md` | Detailed lead/worker operating model. |
 
 ## Delegation Policy
 
