@@ -237,6 +237,27 @@ function registerWorkerTools() {
     "claude-code": () => claudeSummarizeSession({ id, maxChars })
   }));
 
+  server.registerTool("worker_metrics_report", {
+    title: "TaskMarshal Metrics Report",
+    description: "Return a compact cross-session metrics report for routing and token-efficiency decisions.",
+    inputSchema: {
+      provider: Provider.default("reasonix").describe("Worker provider to inspect."),
+      limit: z.number().int().min(1).max(500).default(20).describe("Maximum recent metric records to include."),
+      model: z.string().optional().describe("Optional model filter."),
+      since: z.string().optional().describe("Optional parseable date or timestamp filter."),
+      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ provider, limit, model, since, maxSessions }) => routeProvider(provider, {
+    reasonix: () => {
+      const args = ["metrics", "--limit", String(limit), "--max-sessions", String(maxSessions)];
+      if (model) args.push("--model", model);
+      if (since) args.push("--since", since);
+      return runCtl(args);
+    },
+    "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions })
+  }));
+
   server.registerTool("worker_plan_pro_review", {
     title: "TaskMarshal Plan Pro Review",
     description: "Create a bounded DeepSeek v4 pro second-pass review task for high-risk, architecture, tricky debugging, or final verification work.",
@@ -419,6 +440,23 @@ function registerReasonixCompatTools() {
     annotations: readOnlyAnnotations()
   }, async ({ id, maxChars }) => {
     return toolResult(await runCtl(["summarize", id, "--max-chars", String(maxChars)]));
+  });
+
+  server.registerTool("reasonix_metrics_report", {
+    title: "Reasonix Metrics Report",
+    description: "Legacy compatibility alias for worker_metrics_report with provider='reasonix'. Prefer worker_metrics_report.",
+    inputSchema: {
+      limit: z.number().int().min(1).max(500).default(20).describe("Maximum recent metric records to include."),
+      model: z.string().optional().describe("Optional model filter."),
+      since: z.string().optional().describe("Optional parseable date or timestamp filter."),
+      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ limit, model, since, maxSessions }) => {
+    const args = ["metrics", "--limit", String(limit), "--max-sessions", String(maxSessions)];
+    if (model) args.push("--model", model);
+    if (since) args.push("--since", since);
+    return toolResult(await runCtl(args));
   });
 
   server.registerTool("reasonix_approve", {
@@ -696,6 +734,123 @@ function claudeSummarizeSession({ id, maxChars = 6000 }) {
   }, maxChars));
 }
 
+function claudeMetricsReport({ limit = 20, model = null, since = null, maxSessions = 200 }) {
+  mkdirSync(CLAUDE_SESSION_DIR, { recursive: true });
+  const sinceMs = since ? Date.parse(since) : null;
+  const records = readdirSync(CLAUDE_SESSION_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => readJsonLenient(resolve(CLAUDE_SESSION_DIR, entry.name, "session.json")))
+    .filter(Boolean)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, maxSessions)
+    .flatMap((meta) => claudeMetricRecords(meta))
+    .filter((record) => {
+      if (model && record.model !== model) return false;
+      const tsMs = record.ts ? Date.parse(record.ts) : NaN;
+      if (Number.isFinite(sinceMs) && Number.isFinite(tsMs) && tsMs < sinceMs) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+  const recent = records.slice(0, limit);
+  const totals = summarizeMetrics(records);
+  return success({
+    generatedAt: new Date().toISOString(),
+    source: "claude-code logical session metadata",
+    filters: { limit, provider: "claude-code", model, since, maxSessions },
+    totals,
+    byModel: groupMetrics(records, "model"),
+    byProvider: groupMetrics(records, "provider"),
+    recent,
+    guidance: buildMetricsGuidance(totals)
+  });
+}
+
+function claudeMetricRecords(meta) {
+  const events = readTailJsonl(meta.events, 2000);
+  const sends = new Map(
+    events
+      .filter((event) => event.method === "control/send" && event.turnId)
+      .map((event) => [event.turnId, event])
+  );
+  const turns = events
+    .filter((event) => event.method === "control/turn_finished" && event.turn)
+    .map((event) => event.turn);
+  const errors = events.filter((event) => event.method === "control/turn_error");
+  const records = turns.map((turn) => {
+    const send = sends.get(turn.turnId);
+    const elapsedMs = turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : null;
+    return {
+      ts: turn.finishedAt ?? null,
+      provider: "claude-code",
+      session: meta.id,
+      model: meta.model ?? null,
+      approveMode: meta.approve ?? null,
+      ok: true,
+      stopReason: turn.stopReason ?? null,
+      elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
+      promptChars: String(send?.prompt ?? "").length,
+      assistantChars: String(turn.assistantText ?? "").length,
+      permissionRequests: 0,
+      approvals: 0,
+      denials: 0,
+      autoPermissions: 0,
+      filesChangedCount: 0,
+      verification: "unknown",
+      redoCount: 0,
+      totalCostUsd: Number(turn.totalCostUsd) || 0,
+      error: null
+    };
+  });
+  for (const event of errors) {
+    const send = sends.get(event.turnId);
+    records.push({
+      ts: event.ts ?? null,
+      provider: "claude-code",
+      session: meta.id,
+      model: meta.model ?? null,
+      approveMode: meta.approve ?? null,
+      ok: false,
+      stopReason: "error",
+      elapsedMs: null,
+      promptChars: String(send?.prompt ?? "").length,
+      assistantChars: 0,
+      permissionRequests: 0,
+      approvals: 0,
+      denials: 0,
+      autoPermissions: 0,
+      filesChangedCount: 0,
+      verification: "unknown",
+      redoCount: 0,
+      totalCostUsd: 0,
+      error: event.error ?? "unknown error"
+    });
+  }
+  if (!records.length && meta.lastTurn) {
+    records.push({
+      ts: meta.lastTurn.finishedAt ?? meta.updatedAt ?? null,
+      provider: "claude-code",
+      session: meta.id,
+      model: meta.model ?? null,
+      approveMode: meta.approve ?? null,
+      ok: meta.lastTurn.ok ?? null,
+      stopReason: meta.lastTurn.stopReason ?? null,
+      elapsedMs: null,
+      promptChars: 0,
+      assistantChars: String(meta.lastTurn.assistantText ?? "").length,
+      permissionRequests: 0,
+      approvals: 0,
+      denials: 0,
+      autoPermissions: 0,
+      filesChangedCount: 0,
+      verification: "unknown",
+      redoCount: 0,
+      totalCostUsd: Number(meta.lastTurn.totalCostUsd) || 0,
+      error: meta.lastTurn.error ?? null
+    });
+  }
+  return records;
+}
+
 function claudeStop(id) {
   const meta = readClaudeMeta(id);
   meta.status = "stopped";
@@ -935,6 +1090,74 @@ function readTailJsonl(path, count) {
         return { malformed: line };
       }
     });
+}
+
+function summarizeMetrics(records) {
+  const elapsedRecords = records.filter((record) => Number.isFinite(record.elapsedMs));
+  const okCount = records.filter((record) => record.ok === true).length;
+  const failedCount = records.filter((record) => record.ok === false).length;
+  return {
+    turnCount: records.length,
+    okCount,
+    failedCount,
+    successRate: records.length ? round(okCount / records.length, 3) : null,
+    elapsedMs: sumBy(records, "elapsedMs"),
+    avgElapsedMs: elapsedRecords.length ? Math.round(sumBy(elapsedRecords, "elapsedMs") / elapsedRecords.length) : null,
+    promptChars: sumBy(records, "promptChars"),
+    assistantChars: sumBy(records, "assistantChars"),
+    avgAssistantChars: records.length ? Math.round(sumBy(records, "assistantChars") / records.length) : null,
+    permissionRequests: sumBy(records, "permissionRequests"),
+    autoPermissions: sumBy(records, "autoPermissions"),
+    filesChangedCount: sumBy(records, "filesChangedCount"),
+    unknownVerificationCount: records.filter((record) => record.verification === "unknown").length,
+    redoCount: sumBy(records, "redoCount"),
+    totalCostUsd: sumBy(records, "totalCostUsd")
+  };
+}
+
+function groupMetrics(records, key) {
+  const groups = new Map();
+  for (const record of records) {
+    const name = record[key] ?? "unknown";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(record);
+  }
+  return Object.fromEntries(
+    [...groups.entries()]
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([name, items]) => [name, summarizeMetrics(items)])
+  );
+}
+
+function buildMetricsGuidance(totals) {
+  const guidance = [];
+  if (!totals.turnCount) {
+    guidance.push("No metrics found yet. Run persistent worker sessions and summarize them before tuning routing.");
+    return guidance;
+  }
+  if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
+    guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
+  }
+  if (totals.unknownVerificationCount > 0) {
+    guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
+  }
+  if (totals.permissionRequests > 0 && totals.autoPermissions === totals.permissionRequests) {
+    guidance.push("Recent turns used automatic permission handling; use manual approval for risky implementation sessions.");
+  }
+  if (!guidance.length) guidance.push("Metrics are healthy enough for static Local/flash/pro routing.");
+  return guidance;
+}
+
+function sumBy(items, key) {
+  return items.reduce((total, item) => {
+    const value = Number(item?.[key]);
+    return Number.isFinite(value) ? total + value : total;
+  }, 0);
+}
+
+function round(value, digits) {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function compactTextFields(value, maxChars) {

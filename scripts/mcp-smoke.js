@@ -18,6 +18,13 @@ const transport = new StdioClientTransport({
 await client.connect(transport);
 const tools = await client.listTools();
 const providers = await client.callTool({ name: "worker_list_providers", arguments: {} });
+const metricsReport = await client.callTool({
+  name: "worker_metrics_report",
+  arguments: {
+    provider: "reasonix",
+    limit: 3
+  }
+});
 const proReviewPlan = await client.callTool({
   name: "worker_plan_pro_review",
   arguments: {
@@ -27,12 +34,18 @@ const proReviewPlan = await client.callTool({
 });
 const hasWorkerSendTask = tools.tools.some((tool) => tool.name === "worker_send_task");
 const hasWorkerSummarizeSession = tools.tools.some((tool) => tool.name === "worker_summarize_session");
+const hasWorkerMetricsReport = tools.tools.some((tool) => tool.name === "worker_metrics_report");
 const hasWorkerPlanProReview = tools.tools.some((tool) => tool.name === "worker_plan_pro_review");
 const hasReasonixAlias = tools.tools.some((tool) => tool.name === "reasonix_send_task");
 const hasReasonixSummarizeAlias = tools.tools.some((tool) => tool.name === "reasonix_summarize_session");
+const hasReasonixMetricsAlias = tools.tools.some((tool) => tool.name === "reasonix_metrics_report");
 const providerIds = providers.structuredContent?.data?.providers?.map((provider) => provider.id) ?? [];
 const reasonix = providers.structuredContent?.data?.providers?.find((provider) => provider.id === "reasonix");
 const reasonixModels = reasonix?.models?.map((model) => model.id) ?? [];
+const metricsData = metricsReport.structuredContent?.data;
+const hasUsableMetricsReport = Boolean(metricsData?.totals)
+  && Array.isArray(metricsData?.recent)
+  && Array.isArray(metricsData?.guidance);
 const proReviewData = proReviewPlan.structuredContent?.data;
 const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
   && proReviewData?.model === "deepseek-v4-pro"
@@ -42,12 +55,16 @@ const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
 
 const ok = hasWorkerSendTask
     && hasWorkerSummarizeSession
+    && hasWorkerMetricsReport
+    && hasUsableMetricsReport
     && hasWorkerPlanProReview
     && hasUsableProReviewPlan
     && (!hideLegacy || !hasReasonixAlias)
     && (!hideLegacy || !hasReasonixSummarizeAlias)
+    && (!hideLegacy || !hasReasonixMetricsAlias)
     && (hideLegacy || hasReasonixAlias)
     && (hideLegacy || hasReasonixSummarizeAlias)
+    && (hideLegacy || hasReasonixMetricsAlias)
     && providerIds.includes("reasonix")
     && providerIds.includes("claude-code")
     && reasonixModels.includes("deepseek-v4-flash")
@@ -59,10 +76,13 @@ console.log(JSON.stringify({
   hideLegacy,
   hasWorkerSendTask,
   hasWorkerSummarizeSession,
+  hasWorkerMetricsReport,
+  hasUsableMetricsReport,
   hasWorkerPlanProReview,
   hasUsableProReviewPlan,
   hasReasonixAlias,
   hasReasonixSummarizeAlias,
+  hasReasonixMetricsAlias,
   providers: providerIds,
   reasonixModels
 }, null, 2));

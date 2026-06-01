@@ -38,6 +38,7 @@ function main() {
   if (cmd === "models") return models();
   if (cmd === "ask") return ask(args);
   if (cmd === "smoke") return smoke();
+  if (cmd === "metrics") return metricsReport(args);
   if (cmd === "start") return startSession(args);
   if (cmd === "list") return listSessions();
   if (cmd === "status") return statusSession(args);
@@ -265,6 +266,10 @@ async function observeSession(args) {
 async function summarizeSession(args) {
   const { id, maxChars } = parseSummarizeArgs(args);
   output(writeSessionSummary(id, { maxChars }));
+}
+
+async function metricsReport(args) {
+  output(await buildMetricsReport(parseMetricsArgs(args)));
 }
 
 async function postSessionCommand(args, command) {
@@ -635,6 +640,35 @@ function parseSummarizeArgs(args) {
   return { id, maxChars };
 }
 
+function parseMetricsArgs(args) {
+  const out = {
+    limit: 20,
+    provider: null,
+    model: null,
+    since: null,
+    maxSessions: 200
+  };
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i];
+    if (a === "--limit") out.limit = Number(args[++i] || out.limit);
+    else if (a === "--provider") out.provider = args[++i] || null;
+    else if (a === "--model") out.model = args[++i] || null;
+    else if (a === "--since") out.since = args[++i] || null;
+    else if (a === "--max-sessions") out.maxSessions = Number(args[++i] || out.maxSessions);
+    else throw new Error(`Unknown metrics option: ${a}`);
+  }
+  if (!Number.isInteger(out.limit) || out.limit < 1 || out.limit > 500) {
+    throw new Error("--limit must be an integer between 1 and 500");
+  }
+  if (!Number.isInteger(out.maxSessions) || out.maxSessions < 1 || out.maxSessions > 2000) {
+    throw new Error("--max-sessions must be an integer between 1 and 2000");
+  }
+  if (out.since && Number.isNaN(Date.parse(out.since))) {
+    throw new Error("--since must be a parseable date or timestamp");
+  }
+  return out;
+}
+
 function requireSessionId(args) {
   const id = args[0];
   if (!id) throw new Error("SESSION_ID required");
@@ -667,6 +701,7 @@ Usage:
   taskmarshalctl doctor
   taskmarshalctl models
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
+  taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE]
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
@@ -708,6 +743,160 @@ function readJsonLenient(path) {
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw);
+}
+
+function readJsonOptional(path) {
+  try {
+    return readJsonLenient(path);
+  } catch {
+    return null;
+  }
+}
+
+async function buildMetricsReport({ limit = 20, provider = null, model = null, since = null, maxSessions = 200 } = {}) {
+  const sinceMs = since ? Date.parse(since) : null;
+  const records = [];
+  const sessionDirs = await listSessionDirs(maxSessions);
+  for (const dir of sessionDirs) {
+    const meta = readJsonOptional(resolve(dir, "session.json"));
+    const summary = readJsonOptional(resolve(dir, "session-summary.json"));
+    for (const metric of readJsonl(resolve(dir, "metrics.jsonl"))) {
+      if (metric.malformed) continue;
+      const tsMs = metric.ts ? Date.parse(metric.ts) : NaN;
+      if (Number.isFinite(sinceMs) && Number.isFinite(tsMs) && tsMs < sinceMs) continue;
+      const row = normalizeMetricRecord(metric, { meta, summary, dir });
+      if (provider && row.provider !== provider) continue;
+      if (model && row.model !== model) continue;
+      records.push(row);
+    }
+  }
+  records.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+  const recent = records.slice(0, limit);
+  const totals = summarizeMetrics(records);
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    source: "reasonix persistent session metrics",
+    filters: { limit, provider, model, since, maxSessions },
+    totals,
+    byModel: groupMetrics(records, "model"),
+    byProvider: groupMetrics(records, "provider"),
+    recent,
+    guidance: buildMetricsGuidance(totals)
+  };
+}
+
+async function listSessionDirs(maxSessions) {
+  if (!existsSync(SESSION_DIR)) return [];
+  const entries = await readdir(SESSION_DIR, { withFileTypes: true });
+  const dirs = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const dir = resolve(SESSION_DIR, entry.name);
+      const meta = readJsonOptional(resolve(dir, "session.json"));
+      const summary = readJsonOptional(resolve(dir, "session-summary.json"));
+      return {
+        dir,
+        updatedAt: meta?.updatedAt ?? summary?.finishedAt ?? summary?.generatedAt ?? ""
+      };
+    })
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, maxSessions)
+    .map((entry) => entry.dir);
+  return dirs;
+}
+
+function normalizeMetricRecord(metric, { meta, summary, dir }) {
+  return {
+    ts: metric.ts ?? null,
+    provider: metric.provider ?? summary?.provider ?? "reasonix",
+    session: metric.session ?? meta?.id ?? summary?.id ?? dirname(dir),
+    model: metric.model ?? meta?.model ?? summary?.model ?? null,
+    approveMode: metric.approveMode ?? meta?.approve ?? summary?.metrics?.approveMode ?? null,
+    ok: metric.ok ?? null,
+    stopReason: metric.stopReason ?? null,
+    elapsedMs: numericOrNull(metric.elapsedMs),
+    promptChars: numericOrZero(metric.promptChars),
+    assistantChars: numericOrZero(metric.assistantChars),
+    permissionRequests: numericOrZero(metric.permissionRequests),
+    approvals: numericOrZero(metric.approvals),
+    denials: numericOrZero(metric.denials),
+    autoPermissions: numericOrZero(metric.autoPermissions),
+    filesChangedCount: Array.isArray(metric.filesChanged) ? metric.filesChanged.length : numericOrZero(metric.filesChangedCount),
+    verification: metric.verification ?? "unknown",
+    redoCount: numericOrZero(metric.redoCount),
+    error: metric.error ?? null
+  };
+}
+
+function summarizeMetrics(records) {
+  const elapsedRecords = records.filter((record) => Number.isFinite(record.elapsedMs));
+  const okCount = records.filter((record) => record.ok === true).length;
+  const failedCount = records.filter((record) => record.ok === false).length;
+  return {
+    turnCount: records.length,
+    okCount,
+    failedCount,
+    successRate: records.length ? round(okCount / records.length, 3) : null,
+    elapsedMs: sumBy(records, "elapsedMs"),
+    avgElapsedMs: elapsedRecords.length ? Math.round(sumBy(elapsedRecords, "elapsedMs") / elapsedRecords.length) : null,
+    promptChars: sumBy(records, "promptChars"),
+    assistantChars: sumBy(records, "assistantChars"),
+    avgAssistantChars: records.length ? Math.round(sumBy(records, "assistantChars") / records.length) : null,
+    permissionRequests: sumBy(records, "permissionRequests"),
+    autoPermissions: sumBy(records, "autoPermissions"),
+    filesChangedCount: sumBy(records, "filesChangedCount"),
+    unknownVerificationCount: records.filter((record) => record.verification === "unknown").length,
+    redoCount: sumBy(records, "redoCount")
+  };
+}
+
+function groupMetrics(records, key) {
+  const groups = new Map();
+  for (const record of records) {
+    const name = record[key] ?? "unknown";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(record);
+  }
+  return Object.fromEntries(
+    [...groups.entries()]
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([name, items]) => [name, summarizeMetrics(items)])
+  );
+}
+
+function buildMetricsGuidance(totals) {
+  const guidance = [];
+  if (!totals.turnCount) {
+    guidance.push("No persistent-session metrics found yet. Run persistent worker sessions to collect small metrics records.");
+    return guidance;
+  }
+  if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
+    guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
+  }
+  if (totals.unknownVerificationCount > 0) {
+    guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
+  }
+  if (totals.permissionRequests > 0 && totals.autoPermissions === totals.permissionRequests) {
+    guidance.push("Recent turns used automatic permission handling; use manual approval for risky implementation sessions.");
+  }
+  if (!guidance.length) guidance.push("Metrics are healthy enough for static Local/flash/pro routing.");
+  return guidance;
+}
+
+function numericOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function numericOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function round(value, digits) {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function readSessionMeta(id) {

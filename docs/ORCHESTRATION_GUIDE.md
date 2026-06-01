@@ -46,6 +46,7 @@ worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 400
 worker_observe(provider: "reasonix", id: "audit", mode: "permission", maxChars: 2000)
 worker_observe(provider: "reasonix", id: "audit", mode: "final", maxChars: 6000)
 worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
+worker_metrics_report(provider: "reasonix", limit: 20)
 ```
 
 Use full event observation only when compact state is not enough:
@@ -77,6 +78,11 @@ Reasonix writes `session-summary.json` when summarized or stopped. New
 persistent Reasonix turns also append `metrics.jsonl` in the session directory.
 These records are intentionally small and secret-free, and can later drive
 Local / flash / pro routing decisions.
+
+Use `worker_metrics_report` for cross-session routing evidence. It reads compact
+metrics records and session metadata, not large transcripts or event logs. The
+report includes recent turns, model/provider aggregates, average assistant
+output size, permission counts, verification coverage, and routing guidance.
 
 ## Pro Second Pass
 
@@ -110,6 +116,8 @@ to hide `reasonix_*` compatibility aliases and reduce MCP tool-list tokens.
   and first-pass work.
 - Use `pro` for architecture review, tricky debugging, security-sensitive
   changes, final review, or when a `flash` result is uncertain.
+- If metrics show large average assistant output or repeated unknown
+  verification, tighten worker yield budgets before adding more worker passes.
 
 The economical default is Codex plans, `flash` executes or audits, and `pro`
 reviews only when risk justifies it.

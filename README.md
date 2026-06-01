@@ -56,6 +56,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Event observation through JSONL session logs
 - Compact observation modes for token-sensitive supervision
 - Session summaries with lightweight task metrics
+- Cross-session metrics reports for routing and token-efficiency tuning
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -200,6 +201,7 @@ Provider-neutral tools:
 | `worker_send_task` | Send a bounded task to a session. |
 | `worker_observe` | Read recent worker events. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
+| `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
 | `worker_plan_pro_review` | Build a bounded DeepSeek v4 pro second-pass review task. |
 | `worker_approve` | Approve a pending permission request. |
 | `worker_deny` | Deny a pending permission request. |
@@ -247,6 +249,7 @@ reasonix_status
 reasonix_send_task
 reasonix_observe
 reasonix_summarize_session
+reasonix_metrics_report
 reasonix_approve
 reasonix_deny
 reasonix_cancel
@@ -265,6 +268,7 @@ Use the Reasonix adapter without MCP:
 node taskmarshalctl.js doctor
 node taskmarshalctl.js models
 node taskmarshalctl.js smoke
+node taskmarshalctl.js metrics --limit 10
 node taskmarshalctl.js ask "Summarize this repository. Do not edit files." --approve cancel
 node taskmarshalctl.js ask "Review this design for risks." --approve cancel --model pro
 ```
@@ -307,8 +311,10 @@ The economical TaskMarshal loop is:
 4. Codex observes with `mode: "summary"` or `mode: "permission"`.
 5. Codex asks `worker_summarize_session` for a compact digest and metrics when
    the worker finishes.
-6. Worker returns a diff-oriented yield summary.
-7. Codex reviews the changed files and verifies locally.
+6. Codex checks `worker_metrics_report` when routing quality or token cost
+   needs evidence.
+7. Worker returns a diff-oriented yield summary.
+8. Codex reviews the changed files and verifies locally.
 
 Use `flash` for exploration, routine implementation, and low-risk long
 sessions. Use `pro` only for architecture decisions, tricky debugging,
@@ -321,6 +327,10 @@ Reasonix session summaries are also written to
 turns append lightweight metrics to `metrics.jsonl`, including model, elapsed
 time, prompt/assistant character counts, permission counts, errors, and
 verification placeholders for future routing feedback.
+
+Use `worker_metrics_report` or `taskmarshalctl metrics --limit 20` to inspect
+recent turns without loading raw `events.jsonl` or transcripts into Codex
+context.
 
 Templates:
 
