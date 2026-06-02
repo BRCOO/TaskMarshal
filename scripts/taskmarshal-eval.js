@@ -39,6 +39,43 @@ results.push({
   error: metricsAwareRoute.error
 });
 
+const configPath = resolve(process.cwd(), ".taskmarshal", "eval-codex-config.toml");
+if (existsSync(configPath)) rmSync(configPath, { force: true });
+const configPrint = run(["install-codex-config"]);
+const configWrite = run(["install-codex-config", "--write-user", "--config", configPath, "--server", resolve(process.cwd(), "mcp-server.js")]);
+const configWriteAgain = run(["install-codex-config", "--write-user", "--config", configPath, "--server", resolve(process.cwd(), "mcp-server.js")]);
+const configText = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+const configMergePath = resolve(process.cwd(), ".taskmarshal", "eval-codex-config-merge.toml");
+writeFileSync(configMergePath, [
+  "[mcp_servers.taskmarshal-mcp]",
+  "command = \"old-node\"",
+  "custom = \"keep\"",
+  "",
+  "[mcp_servers.taskmarshal-mcp.env]",
+  "EXISTING_FLAG = \"keep\"",
+  "TASKMARSHAL_TOOL_PROFILE = \"standard\"",
+  ""
+].join("\n"), "utf8");
+const configMerge = run(["install-codex-config", "--write-user", "--config", configMergePath, "--server", resolve(process.cwd(), "mcp-server.js")]);
+const configMergeText = existsSync(configMergePath) ? readFileSync(configMergePath, "utf8") : "";
+results.push({
+  name: "install codex config",
+  passed: configPrint.ok
+    && configPrint.data?.snippet?.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\"")
+    && configWrite.ok
+    && configWrite.data?.changed === true
+    && configWriteAgain.ok
+    && configWriteAgain.data?.changed === false
+    && configText.includes("[mcp_servers.taskmarshal-mcp.env]")
+    && configText.includes("TASKMARSHAL_COMPACT_TOOL_TEXT = \"1\"")
+    && configMerge.ok
+    && configMergeText.includes("custom = \"keep\"")
+    && configMergeText.includes("EXISTING_FLAG = \"keep\"")
+    && configMergeText.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\""),
+  data: { print: configPrint.data, write: configWrite.data, writeAgain: configWriteAgain.data, merge: configMerge.data },
+  error: configPrint.error || configWrite.error || configWriteAgain.error || configMerge.error
+});
+
 const task = run(["task-create", "--goal", "eval token firewall", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "plan;verify"]);
 let gatePassed = false;
 if (task.ok && task.data.taskId) {

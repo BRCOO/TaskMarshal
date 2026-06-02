@@ -108,6 +108,19 @@ npm run eval
 
 ### 3. Register the MCP server with Codex
 
+Recommended token-saving config:
+
+```bash
+node taskmarshalctl.js install-codex-config --write-user
+codex mcp list
+```
+
+This writes a `taskmarshal-mcp` server entry to `~/.codex/config.toml` with
+`TASKMARSHAL_TOOL_PROFILE=minimal` and
+`TASKMARSHAL_COMPACT_TOOL_TEXT=1`. Restart Codex after changing MCP config.
+
+Manual registration is also supported.
+
 Windows:
 
 ```bash
@@ -234,7 +247,7 @@ For broad audits or slow investigations, avoid `worker_ask` / `reasonix_ask`. Th
 
 ```text
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
-worker_send_task(provider: "reasonix", id: "audit", prompt: "Read-only audit ...")
+worker_send_task(provider: "reasonix", id: "audit", taskId: "task", prompt: "Read-only audit ...")
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
 ```
 
@@ -288,6 +301,16 @@ legacy Reasonix aliases automatically. `TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps
 full `structuredContent` for clients, but reduces the visible text result to a
 one-line control summary.
 
+To install that setup into Codex user config:
+
+```bash
+node taskmarshalctl.js install-codex-config --write-user
+```
+
+By default, `install-codex-config` only prints the TOML snippet. With
+`--write-user`, it updates `~/.codex/config.toml` and writes a timestamped
+backup before changing an existing file.
+
 ## Direct CLI Usage
 
 Use the Reasonix adapter without MCP:
@@ -324,7 +347,7 @@ Claude Code provider through MCP:
 ```text
 worker_ask(provider: "claude-code", prompt: "Analyze this repo in plan mode", approve: "cancel")
 worker_start_session(provider: "claude-code", id: "claude-review", approve: "cancel")
-worker_send_task(provider: "claude-code", id: "claude-review", prompt: "Review these files")
+worker_send_task(provider: "claude-code", id: "claude-review", taskId: "task", prompt: "Review these files")
 worker_observe(provider: "claude-code", id: "claude-review", tail: 20)
 ```
 

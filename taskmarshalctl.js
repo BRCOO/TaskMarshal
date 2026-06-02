@@ -48,6 +48,7 @@ function main() {
   if (cmd === "version" || cmd === "--version" || cmd === "-V") return output({ version: VERSION });
   if (cmd === "doctor") return doctor();
   if (cmd === "models") return models();
+  if (cmd === "install-codex-config") return installCodexConfig(args);
   if (cmd === "ask") return ask(args);
   if (cmd === "smoke") return smoke();
   if (cmd === "metrics") return metricsReport(args);
@@ -89,6 +90,45 @@ async function doctor() {
     stateDir: STATE_DIR,
     sessionDir: SESSION_DIR,
     node: process.version
+  });
+}
+
+function installCodexConfig(args) {
+  const opts = parseInstallCodexConfigArgs(args);
+  const configPath = opts.config
+    ? resolve(opts.config)
+    : resolve(homedir(), ".codex", "config.toml");
+  const serverName = opts.name || "taskmarshal-mcp";
+  const serverPath = opts.server
+    ? resolve(opts.server)
+    : THIS_FILE.replace(/[\\/]taskmarshalctl\.js$/, `${process.platform === "win32" ? "\\" : "/"}mcp-server.js`);
+  const snippet = buildCodexMcpTomlSnippet({ name: serverName, serverPath });
+
+  if (!opts.writeUser) {
+    output({
+      ok: true,
+      mode: "print",
+      configPath,
+      serverName,
+      serverPath,
+      env: codexMcpEnv(),
+      snippet,
+      next: `Run with --write-user to update ${configPath}. Restart Codex after changing MCP config.`
+    });
+    return;
+  }
+
+  const result = writeCodexMcpConfig({ configPath, name: serverName, serverPath });
+  output({
+    ok: true,
+    mode: "write",
+    configPath,
+    backupPath: result.backupPath,
+    serverName,
+    serverPath,
+    env: codexMcpEnv(),
+    changed: result.changed,
+    next: "Restart Codex or open a fresh thread for MCP config changes to take effect."
   });
 }
 
@@ -774,6 +814,25 @@ function parseSendArgs(args) {
   return { id, wait: false, taskId: cleanTaskId(taskId), text: text.join(" ").trim() };
 }
 
+function parseInstallCodexConfigArgs(args) {
+  const out = {
+    writeUser: false,
+    config: null,
+    server: null,
+    name: "taskmarshal-mcp"
+  };
+  for (let i = 0; i < args.length; i += 1) {
+    const item = args[i];
+    if (item === "--write-user") out.writeUser = true;
+    else if (item === "--config") out.config = args[++i];
+    else if (item === "--server") out.server = args[++i];
+    else if (item === "--name") out.name = args[++i];
+    else throw new Error(`Unknown install-codex-config option: ${item}`);
+  }
+  if (!/^[A-Za-z0-9_.-]+$/.test(out.name)) throw new Error("--name must contain only letters, digits, dot, underscore, or dash");
+  return out;
+}
+
 function parseObserveArgs(args) {
   const id = args[0];
   if (!id) throw new Error("observe requires SESSION_ID");
@@ -895,6 +954,7 @@ function help() {
 Usage:
   taskmarshalctl doctor
   taskmarshalctl models
+  taskmarshalctl install-codex-config [--write-user] [--config PATH] [--server PATH] [--name taskmarshal-mcp]
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
   taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE] [--compact]
   taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
@@ -919,6 +979,7 @@ Notes:
   ask uses Reasonix's native ACP JSON-RPC stdio agent.
   Events and transcripts are written under ~/.reasonixctl/runs by default.
   start creates a persistent local daemon backed by reasonix acp.
+  install-codex-config prints a minimal+compact Codex MCP config by default; --write-user updates ~/.codex/config.toml with a backup.
 `);
 }
 
@@ -951,6 +1012,88 @@ function readJsonOptional(path) {
   } catch {
     return null;
   }
+}
+
+function codexMcpEnv() {
+  return {
+    TASKMARSHAL_TOOL_PROFILE: "minimal",
+    TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
+  };
+}
+
+function buildCodexMcpTomlSnippet({ name, serverPath }) {
+  if (serverPath.includes("'")) throw new Error("server path cannot contain single quotes for TOML literal args");
+  return [
+    `[mcp_servers.${name}]`,
+    `command = "node"`,
+    `args = ['${serverPath}']`,
+    ``,
+    `[mcp_servers.${name}.env]`,
+    `TASKMARSHAL_TOOL_PROFILE = "minimal"`,
+    `TASKMARSHAL_COMPACT_TOOL_TEXT = "1"`,
+    ``
+  ].join("\n");
+}
+
+function writeCodexMcpConfig({ configPath, name, serverPath }) {
+  if (serverPath.includes("'")) throw new Error("server path cannot contain single quotes for TOML literal args");
+  const existing = existsSync(configPath) ? readFileSync(configPath, "utf8").replace(/^\uFEFF/, "") : "";
+  const next = upsertTomlKeyValues(
+    upsertTomlKeyValues(existing, `mcp_servers.${name}`, {
+      command: `"node"`,
+      args: `['${serverPath}']`
+    }),
+    `mcp_servers.${name}.env`,
+    {
+      TASKMARSHAL_TOOL_PROFILE: `"minimal"`,
+      TASKMARSHAL_COMPACT_TOOL_TEXT: `"1"`
+    }
+  );
+  if (existing === next) return { changed: false, backupPath: null };
+  mkdirSync(dirname(configPath), { recursive: true });
+  let backupPath = null;
+  if (existsSync(configPath)) {
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    backupPath = `${configPath}.bak-${stamp}`;
+    writeFileSync(backupPath, existing, "utf8");
+  }
+  writeFileSync(configPath, next, "utf8");
+  return { changed: true, backupPath };
+}
+
+function upsertTomlKeyValues(existing, sectionName, values) {
+  const lines = existing.split(/\r?\n/);
+  const header = `[${sectionName}]`;
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start === -1) {
+    const body = [
+      header,
+      ...Object.entries(values).map(([key, value]) => `${key} = ${value}`)
+    ].join("\n");
+    const prefix = existing.trimEnd();
+    return `${prefix}${prefix ? "\n\n" : ""}${body}\n`;
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (/^\[.+\]$/.test(trimmed)) {
+      end = i;
+      break;
+    }
+  }
+  const block = lines.slice(start, end);
+  for (const [key, value] of Object.entries(values)) {
+    const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+    const index = block.findIndex((line, lineIndex) => lineIndex > 0 && keyPattern.test(line));
+    if (index === -1) block.push(`${key} = ${value}`);
+    else block[index] = `${key} = ${value}`;
+  }
+  const nextLines = [...lines.slice(0, start), ...block, ...lines.slice(end)];
+  return `${nextLines.join("\n").trimEnd()}\n`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function buildMetricsReport({ limit = 20, provider = null, model = null, since = null, maxSessions = 200, compact = false } = {}) {

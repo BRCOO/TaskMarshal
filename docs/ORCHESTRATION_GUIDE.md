@@ -42,6 +42,16 @@ TASKMARSHAL_TOOL_PROFILE=minimal
 TASKMARSHAL_COMPACT_TOOL_TEXT=1
 ```
 
+For Codex, install that configuration with:
+
+```bash
+node taskmarshalctl.js install-codex-config --write-user
+```
+
+The command writes the `taskmarshal-mcp` entry to `~/.codex/config.toml`, keeps a
+timestamped backup when replacing an existing file, and sets the minimal tool
+profile plus compact tool text by default.
+
 `TASKMARSHAL_TOOL_PROFILE=minimal` exposes only the core provider controls and
 the merged task gate, and hides legacy Reasonix aliases automatically.
 `TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps full MCP `structuredContent` while
