@@ -292,7 +292,7 @@ async function metricsReport(args) {
 
 async function routeDecision(args) {
   const input = parseKeyValueArgs(args);
-  const metrics = await buildMetricsReport({ limit: 20, maxSessions: 200 });
+  const metrics = await buildMetricsReport({ limit: 20, maxSessions: 200, compact: true });
   output(buildRouteDecision({ input, metrics }));
 }
 
@@ -302,7 +302,10 @@ async function taskCreate(args) {
   if (!goal) throw new Error("task-create requires --goal TEXT");
   const scope = splitList(input.scope);
   const risk = normalizeRisk(input.risk);
-  const route = input.route || buildRouteDecision({ input: { ...input, risk, scope: scope.join(",") }, metrics: await buildMetricsReport({ limit: 20 }) }).route;
+  const route = input.route || buildRouteDecision({
+    input: { ...input, risk, scope: scope.join(",") },
+    metrics: await buildMetricsReport({ limit: 20, compact: true })
+  }).route;
   const id = input.id || makeTaskId(goal);
   const dir = taskDir(id);
   const steps = buildTaskSteps({ goal, scope, risk, route, steps: splitList(input.steps) });
@@ -338,6 +341,8 @@ function recordVerification(args) {
     command: limitText(cleanText(input.command), 300) || null,
     exitCode: input.exitCode === undefined ? null : Number(input.exitCode),
     note: limitText(cleanText(input.note), 500) || null,
+    session: limitText(cleanText(input.session), 120) || null,
+    turnId: limitText(cleanText(input.turnId), 120) || null,
     recordedAt: new Date().toISOString()
   };
   task.verification = verification;
@@ -351,14 +356,24 @@ function recordVerification(args) {
     verification: status,
     command: verification.command,
     exitCode: verification.exitCode,
+    session: verification.session,
+    turnId: verification.turnId,
     stepCount: task.steps.length,
     completedSteps: task.steps.filter((step) => step.status === "done").length
+  });
+  const linkedMetric = updateSessionMetricVerification({
+    sessionId: verification.session,
+    turnId: verification.turnId,
+    taskId: task.id,
+    verification: status,
+    verifiedAt: verification.recordedAt
   });
   output({
     ok: true,
     taskId: task.id,
     verification: status,
     exitCode: verification.exitCode,
+    linkedMetric,
     next: status === "pass" ? "finalize" : "fix_or_skip"
   });
 }
@@ -873,7 +888,7 @@ Usage:
   taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
   taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]
   taskmarshalctl checkpoint --id TASK_ID --step STEP_ID [--note TEXT]
-  taskmarshalctl verify --id TASK_ID --status pass|fail|skip [--command CMD] [--exit-code N]
+  taskmarshalctl verify --id TASK_ID --status pass|fail|skip [--command CMD] [--exit-code N] [--session SESSION_ID] [--turn-id TURN_ID]
   taskmarshalctl finalize --id TASK_ID
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
@@ -1147,6 +1162,9 @@ function buildRouteDecision({ input, metrics }) {
     ? String(input.route).toLowerCase()
     : null;
   const totals = metrics?.totals ?? {};
+  const flashMetrics = getMetricGroup(metrics, "deepseek-v4-flash", "flash");
+  const taskVerification = metrics?.taskVerification ?? {};
+  const evidence = buildRoutingEvidence({ totals, flashMetrics, taskVerification });
   const reasonCodes = [];
   let route = "local";
   if (explicitRoute) {
@@ -1161,20 +1179,64 @@ function buildRouteDecision({ input, metrics }) {
   } else {
     reasonCodes.push("SMALL_LOCAL");
   }
+  if (route === "flash" && evidence.upgradeFlashToPro) {
+    route = "pro";
+    reasonCodes.push("METRICS_UPGRADE_TO_PRO");
+  }
   if (route === "pro" && totals.unknownVerificationCount > 0) {
     reasonCodes.push("REQUIRE_VERIFICATION_RECORD");
   }
-  const outputBudget = totals.avgAssistantChars > 8000 ? "tight" : "short";
-  if (outputBudget === "tight") reasonCodes.push("WORKER_OUTPUT_TOO_LONG");
+  const outputBudget = route === "local" ? "short" : evidence.tightOutput ? "tight" : "short";
+  if (route !== "local" && outputBudget === "tight") reasonCodes.push("WORKER_OUTPUT_TOO_LONG");
+  if (evidence.taskFailCount > 0) reasonCodes.push("TASK_FAILURE_HISTORY");
   return {
     ok: true,
     route,
     provider: route === "local" ? null : "reasonix",
     model: route === "pro" ? "pro" : route === "flash" ? "flash" : null,
     reasonCodes,
+    metricsEvidence: evidence,
     outputBudget,
     maxCodexChars: 900,
     next: route === "local" ? "do_local" : "task-create"
+  };
+}
+
+function getMetricGroup(metrics, ...names) {
+  for (const name of names) {
+    if (metrics?.byModel?.[name]) return metrics.byModel[name];
+    if (metrics?.byProvider?.[name]) return metrics.byProvider[name];
+  }
+  return {};
+}
+
+function buildRoutingEvidence({ totals, flashMetrics, taskVerification }) {
+  const byStatus = taskVerification?.byStatus ?? {};
+  const taskFailCount = byStatus.fail || 0;
+  const taskPassCount = byStatus.pass || 0;
+  const flashFailureRate = flashMetrics.turnCount
+    ? round((flashMetrics.failedCount || 0) / flashMetrics.turnCount, 3)
+    : 0;
+  const unknownVerificationRate = totals.turnCount
+    ? round((totals.unknownVerificationCount || 0) / totals.turnCount, 3)
+    : 0;
+  return {
+    source: "compact_metrics",
+    turnCount: totals.turnCount || 0,
+    taskPassCount,
+    taskFailCount,
+    flashTurnCount: flashMetrics.turnCount || 0,
+    flashFailureRate,
+    unknownVerificationRate,
+    avgAssistantChars: totals.avgAssistantChars || 0,
+    tightOutput: Boolean(totals.avgAssistantChars && totals.avgAssistantChars > 8000),
+    upgradeFlashToPro: Boolean(
+      flashMetrics.turnCount >= 3
+      && (
+        flashFailureRate >= 0.25
+        || (taskFailCount > 0 && taskFailCount >= taskPassCount)
+      )
+    )
   };
 }
 
@@ -1524,6 +1586,36 @@ function readJsonl(path) {
         return { malformed: line };
       }
     });
+}
+
+function updateSessionMetricVerification({ sessionId, turnId, taskId, verification, verifiedAt }) {
+  if (!sessionId) return { ok: false, reason: "no_session" };
+  if (!/^[A-Za-z0-9_.-]+$/.test(sessionId)) return { ok: false, reason: "invalid_session" };
+  const metricsPath = resolve(SESSION_DIR, sessionId, "metrics.jsonl");
+  if (!existsSync(metricsPath)) return { ok: false, reason: "metrics_not_found" };
+  const records = readJsonl(metricsPath);
+  const validIndexes = records
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => !record.malformed);
+  if (!validIndexes.length) return { ok: false, reason: "empty_metrics" };
+  const match = turnId
+    ? validIndexes.find(({ record }) => record.turnId === turnId)
+    : [...validIndexes].reverse().find(({ record }) => record.verification === "unknown")
+      || validIndexes.at(-1);
+  if (!match) return { ok: false, reason: "turn_not_found" };
+  records[match.index] = {
+    ...match.record,
+    verification,
+    verifiedAt,
+    taskId
+  };
+  writeFileSync(metricsPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+  return {
+    ok: true,
+    session: sessionId,
+    turnId: records[match.index].turnId ?? null,
+    verification
+  };
 }
 
 function readJsonlTail(path, count) {

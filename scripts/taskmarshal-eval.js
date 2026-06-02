@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
@@ -29,6 +29,16 @@ for (const test of cases) {
   results.push({ name: test.name, passed, data: result.data, error: result.error });
 }
 
+const metricsAwareRoute = run(["route", "--goal", "refactor provider adapter", "--scope", "a.js,b.js,c.js", "--risk", "medium", "--files", "3"]);
+results.push({
+  name: "metrics-aware route evidence",
+  passed: metricsAwareRoute.ok
+    && metricsAwareRoute.data?.metricsEvidence?.source === "compact_metrics"
+    && Number.isInteger(metricsAwareRoute.data?.metricsEvidence?.turnCount),
+  data: metricsAwareRoute.data,
+  error: metricsAwareRoute.error
+});
+
 const task = run(["task-create", "--goal", "eval token firewall", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "plan;verify"]);
 let gatePassed = false;
 if (task.ok && task.data.taskId) {
@@ -40,6 +50,38 @@ if (task.ok && task.data.taskId) {
   results.push({ name: "task gate finalizes", passed: gatePassed, data: done.data, error: done.error });
 } else {
   results.push({ name: "task gate finalizes", passed: false, data: task.data, error: task.error });
+}
+
+const verificationSessionId = "tm-eval-verification-link";
+const verificationTurnId = "synthetic-verify-turn";
+createSyntheticMetricsSession(verificationSessionId, verificationTurnId);
+const linkedTask = run(["task-create", "--goal", "eval verification link", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
+if (linkedTask.ok && linkedTask.data.taskId) {
+  run(["checkpoint", "--id", linkedTask.data.taskId, "--step", "s1", "--note", "eval"]);
+  const linkedVerify = run([
+    "verify",
+    "--id",
+    linkedTask.data.taskId,
+    "--status",
+    "pass",
+    "--command",
+    "eval",
+    "--session",
+    verificationSessionId,
+    "--turn-id",
+    verificationTurnId
+  ]);
+  const metrics = readSyntheticMetrics(verificationSessionId);
+  results.push({
+    name: "verification links session metric",
+    passed: linkedVerify.ok
+      && linkedVerify.data?.linkedMetric?.ok === true
+      && metrics.some((record) => record.turnId === verificationTurnId && record.verification === "pass"),
+    data: { verify: linkedVerify.data, metrics },
+    error: linkedVerify.error
+  });
+} else {
+  results.push({ name: "verification links session metric", passed: false, data: linkedTask.data, error: linkedTask.error });
 }
 
 const compactMetrics = run(["metrics", "--limit", "8", "--compact"]);
@@ -118,4 +160,37 @@ function createSyntheticSession(id) {
     lastTurn: events.at(-1).turn,
     updatedAt: now
   }, null, 2)}\n`, "utf8");
+}
+
+function createSyntheticMetricsSession(id, turnId) {
+  createSyntheticSession(id);
+  const now = new Date().toISOString();
+  const sessionDir = resolve(homedir(), ".reasonixctl", "sessions", id);
+  writeFileSync(resolve(sessionDir, "metrics.jsonl"), `${JSON.stringify({
+    ts: now,
+    provider: "reasonix",
+    session: id,
+    model: "deepseek-v4-flash",
+    turnId,
+    ok: true,
+    stopReason: "end_turn",
+    elapsedMs: 100,
+    promptChars: 10,
+    assistantChars: 20,
+    permissionRequests: 0,
+    approvals: 0,
+    denials: 0,
+    autoPermissions: 0,
+    filesChanged: [],
+    verification: "unknown",
+    redoCount: 0,
+    error: null
+  })}\n`, "utf8");
+}
+
+function readSyntheticMetrics(id) {
+  const metricsPath = resolve(homedir(), ".reasonixctl", "sessions", id, "metrics.jsonl");
+  return existsSync(metricsPath)
+    ? readFileSync(metricsPath, "utf8").trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+    : [];
 }

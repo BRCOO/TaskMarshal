@@ -89,7 +89,8 @@ const hasUsableMetricsReport = Boolean(metricsData?.totals)
   && Array.isArray(metricsData?.guidance);
 const routeData = routeDecision.structuredContent?.data;
 const hasUsableRouteDecision = ["local", "flash", "pro"].includes(routeData?.route)
-  && Array.isArray(routeData?.reasonCodes);
+  && Array.isArray(routeData?.reasonCodes)
+  && routeData?.metricsEvidence?.source === "compact_metrics";
 const taskData = taskCreate.structuredContent?.data;
 const taskId = taskData?.taskId;
 const checkpointOne = taskId ? await client.callTool({

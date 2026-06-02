@@ -374,6 +374,18 @@ report, so routing quality can be judged from local pass/fail/skip evidence.
 Compact metrics reads only recent metric tails per session and omits long task
 verification detail lists.
 
+`taskmarshalctl route` uses compact metrics evidence when available. It keeps
+small tasks local, tightens worker output budgets when recent worker output is
+large, and can upgrade a `flash` route to `pro` when recent verification or
+failure history shows that the cheaper path is not reliable enough.
+
+When recording task verification, pass `--session SESSION_ID` and optionally
+`--turn-id TURN_ID` to mark the corresponding worker metric as pass/fail/skip:
+
+```bash
+taskmarshalctl verify --id TASK_ID --status pass --command "npm test" --session audit --turn-id TURN_ID
+```
+
 Templates:
 
 | Template | Purpose |

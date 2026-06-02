@@ -130,6 +130,22 @@ Use `compact: true` for normal routing checks; it returns aggregates, routing
 hints, and at most three recent records. Compact mode reads recent metric tails
 per session and omits long task-verification detail lists.
 
+`worker_task_gate(action: "route")` and `taskmarshalctl route` also consume this
+compact evidence. Static rules still decide the baseline Local / flash / pro
+route, then metrics can tighten the output budget or upgrade `flash` to `pro`
+when recent worker verification or failure history shows elevated risk.
+
+When a task gate verifies worker output, include the worker session and turn
+when available:
+
+```text
+worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm test", session: "audit", turnId: "TURN_ID")
+```
+
+This updates the matching session metric from `unknown` to pass/fail/skip, so
+future routing decisions are based on verified worker outcomes instead of only
+static heuristics.
+
 ## Pro Second Pass
 
 Use Reasonix `flash` for exploration, routine implementation, low-risk long

@@ -154,7 +154,7 @@ should pass short fields, then rely on local task ledgers and taskKey gates:
 worker_task_gate(action: "route", goal: "...", scope: "...", risk: "medium")
 worker_task_gate(action: "create", goal: "...", scope: "...", risk: "medium")
 worker_task_gate(action: "checkpoint", id: "task", step: "s1")
-worker_task_gate(action: "verify", id: "task", status: "pass")
+worker_task_gate(action: "verify", id: "task", status: "pass", session: "audit", turnId: "TURN_ID")
 worker_task_gate(action: "finalize", id: "task")
 ```
 

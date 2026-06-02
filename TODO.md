@@ -111,9 +111,12 @@ delegation more controlled, verifiable, and reusable.
 - [x] Record task-gate verification into metrics.
   - Acceptance: `worker_metrics_report` shows recent pass/fail/skip task-gate
     evidence without reading task ledgers or transcripts.
-- [ ] Use metrics to tune routing.
-  - Acceptance: future routing can prefer Local, `flash`, or `pro` based on
-    measured outcomes rather than only static rules.
+- [x] Use metrics to tune routing.
+  - Acceptance: route decisions include compact metrics evidence, tighten
+    worker output budgets, and can upgrade weak `flash` history to `pro`.
+- [x] Link task verification back to session metrics.
+  - Acceptance: `verify --session SESSION_ID [--turn-id TURN_ID]` updates the
+    matching session metric from `unknown` to pass/fail/skip.
 - [x] Add a compact cross-session metrics report.
   - Acceptance: Codex can inspect recent turn cost and quality signals without
     loading raw event logs or transcripts.

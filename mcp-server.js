@@ -282,6 +282,8 @@ function registerWorkerTools() {
       status: VerificationStatus.optional().describe("Verification status for verify."),
       command: z.string().default("").describe("Verification command for verify."),
       exitCode: z.number().int().optional().describe("Command exit code for verify."),
+      session: z.string().default("").describe("Optional worker session id whose latest metric should receive this verification."),
+      turnId: z.string().default("").describe("Optional worker turn id to mark as verified."),
       note: z.string().default("").describe("Short note."),
       batch: z.array(z.object({
         action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]),
@@ -296,6 +298,8 @@ function registerWorkerTools() {
         status: VerificationStatus.optional(),
         command: z.string().optional(),
         exitCode: z.number().int().optional(),
+        session: z.string().optional(),
+        turnId: z.string().optional(),
         note: z.string().optional()
       })).max(8).optional().describe("Optional ordered batch of gate actions.")
     },
@@ -347,13 +351,17 @@ function registerWorkerTools() {
       status: VerificationStatus.describe("Verification status."),
       command: z.string().default("").describe("Verification command or check."),
       exitCode: z.number().int().optional().describe("Command exit code."),
+      session: z.string().default("").describe("Optional worker session id whose latest metric should receive this verification."),
+      turnId: z.string().default("").describe("Optional worker turn id to mark as verified."),
       note: z.string().default("").describe("Short verification note.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ id, status, command, exitCode, note }) => {
+  }, async ({ id, status, command, exitCode, session, turnId, note }) => {
     const args = ["verify", "--id", id, "--status", status];
     if (command) args.push("--command", command);
     if (exitCode !== undefined) args.push("--exit-code", String(exitCode));
+    if (session) args.push("--session", session);
+    if (turnId) args.push("--turn-id", turnId);
     if (note) args.push("--note", note);
     return toolResult(await runCtl(args));
   });
@@ -701,6 +709,8 @@ async function runTaskGate(input) {
     const args = ["verify", "--id", input.id, "--status", input.status || "skip"];
     if (input.command) args.push("--command", input.command);
     if (input.exitCode !== undefined) args.push("--exit-code", String(input.exitCode));
+    if (input.session) args.push("--session", input.session);
+    if (input.turnId) args.push("--turn-id", input.turnId);
     if (input.note) args.push("--note", input.note);
     return tagTaskGateResult(action, await runCtl(args));
   }
