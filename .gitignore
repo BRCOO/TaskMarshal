@@ -10,6 +10,7 @@ pnpm-debug.log*
 *.log
 
 # Local TaskMarshal / Reasonix runtime state
+.taskmarshal/
 .reasonix/
 .reasonixctl/
 runs/

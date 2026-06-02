@@ -19,6 +19,9 @@ delegation more controlled, verifiable, and reusable.
 
 ## P0 - Token-Saving Protocol
 
+- [x] Add token-firewall task gates.
+  - Acceptance: Codex can create, checkpoint, verify, and finalize a task using
+    short control packets instead of long task specs or transcripts.
 - [x] Keep `skills/taskmarshal/SKILL.md` as a small routing policy instead of a
   full operating manual.
   - Acceptance: the skill still chooses Local / Light / Full Marshal, but large

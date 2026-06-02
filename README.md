@@ -57,6 +57,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Compact observation modes for token-sensitive supervision
 - Session summaries with lightweight task metrics
 - Cross-session metrics reports for routing and token-efficiency tuning
+- Token-firewall task gates with short control packets and task keys
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -202,6 +203,11 @@ Provider-neutral tools:
 | `worker_observe` | Read recent worker events. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
+| `worker_route_decision` | Return a short deterministic Local/flash/pro routing decision. |
+| `worker_create_task` | Create a local token-firewall task ledger and return a short control packet. |
+| `worker_checkpoint_step` | Mark one task step done. |
+| `worker_record_verification` | Record pass/fail/skip verification. |
+| `worker_finalize_task` | Return a taskKey proof when gates pass. |
 | `worker_plan_pro_review` | Build a bounded DeepSeek v4 pro second-pass review task. |
 | `worker_approve` | Approve a pending permission request. |
 | `worker_deny` | Deny a pending permission request. |
@@ -305,16 +311,20 @@ Claude Code does not expose an external permission callback to TaskMarshal. `wor
 
 The economical TaskMarshal loop is:
 
-1. Codex decides Local, Light, or Full Marshal.
-2. Codex sends a compact task packet instead of the full conversation.
+1. Codex asks `worker_route_decision` for a short Local/flash/pro decision.
+2. Codex calls `worker_create_task` with only short fields.
 3. Worker returns a short plan before edits for Full Marshal tasks.
 4. Codex observes with `mode: "summary"` or `mode: "permission"`.
 5. Codex asks `worker_summarize_session` for a compact digest and metrics when
    the worker finishes.
 6. Codex checks `worker_metrics_report` when routing quality or token cost
    needs evidence.
-7. Worker returns a diff-oriented yield summary.
-8. Codex reviews the changed files and verifies locally.
+7. Codex records verification with `worker_record_verification`.
+8. Codex finalizes with `worker_finalize_task` and accepts only with a taskKey.
+
+Task ledgers are written under local `.taskmarshal/tasks/` and are gitignored.
+MCP tools return short control packets by default; large task artifacts stay on
+disk unless explicitly inspected.
 
 Use `flash` for exploration, routine implementation, and low-risk long
 sessions. Use `pro` only for architecture decisions, tricky debugging,

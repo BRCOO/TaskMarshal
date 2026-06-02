@@ -114,6 +114,11 @@ Prefer provider-neutral tools:
 - `worker_observe`
 - `worker_summarize_session`
 - `worker_metrics_report`
+- `worker_route_decision`
+- `worker_create_task`
+- `worker_checkpoint_step`
+- `worker_record_verification`
+- `worker_finalize_task`
 - `worker_plan_pro_review`
 - `worker_approve`
 - `worker_deny`
@@ -136,6 +141,17 @@ views are not enough.
 
 Use `worker_metrics_report` when deciding whether routing is saving tokens or
 when repeated worker turns feel too verbose, slow, or weakly verified.
+
+For substantial delegated work, prefer token-firewall tools. Codex should pass
+short fields, then rely on local task ledgers and taskKey gates:
+
+```text
+worker_route_decision(goal: "...", scope: "...", risk: "medium")
+worker_create_task(goal: "...", scope: "...", risk: "medium")
+worker_checkpoint_step(id: "task", step: "s1")
+worker_record_verification(id: "task", status: "pass")
+worker_finalize_task(id: "task")
+```
 
 Use `worker_plan_pro_review` before spending a Reasonix `pro` pass. Reserve
 `pro` for architecture, tricky debugging, security-sensitive work, uncertain

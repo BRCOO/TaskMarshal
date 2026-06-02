@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { AcpClient, compactEvent } from "./lib/acp-client.js";
 
 const VERSION = "0.1.0";
+const WORKFLOW_DIR = resolve(process.cwd(), ".taskmarshal");
+const TASK_DIR = resolve(WORKFLOW_DIR, "tasks");
 const STATE_DIR = resolve(homedir(), ".reasonixctl");
 const SESSION_DIR = resolve(STATE_DIR, "sessions");
 const REASONIX_COMMAND = resolveReasonixCommand();
@@ -39,6 +41,11 @@ function main() {
   if (cmd === "ask") return ask(args);
   if (cmd === "smoke") return smoke();
   if (cmd === "metrics") return metricsReport(args);
+  if (cmd === "route") return routeDecision(args);
+  if (cmd === "task-create") return taskCreate(args);
+  if (cmd === "checkpoint") return checkpointStep(args);
+  if (cmd === "verify") return recordVerification(args);
+  if (cmd === "finalize") return finalizeTask(args);
   if (cmd === "start") return startSession(args);
   if (cmd === "list") return listSessions();
   if (cmd === "status") return statusSession(args);
@@ -270,6 +277,119 @@ async function summarizeSession(args) {
 
 async function metricsReport(args) {
   output(await buildMetricsReport(parseMetricsArgs(args)));
+}
+
+async function routeDecision(args) {
+  const input = parseKeyValueArgs(args);
+  const metrics = await buildMetricsReport({ limit: 20, maxSessions: 200 });
+  output(buildRouteDecision({ input, metrics }));
+}
+
+async function taskCreate(args) {
+  const input = parseKeyValueArgs(args);
+  const goal = cleanText(input.goal);
+  if (!goal) throw new Error("task-create requires --goal TEXT");
+  const scope = splitList(input.scope);
+  const risk = normalizeRisk(input.risk);
+  const route = input.route || buildRouteDecision({ input: { ...input, risk, scope: scope.join(",") }, metrics: await buildMetricsReport({ limit: 20 }) }).route;
+  const id = input.id || makeTaskId(goal);
+  const dir = taskDir(id);
+  const steps = buildTaskSteps({ goal, scope, risk, route, steps: splitList(input.steps) });
+  const task = {
+    id,
+    version: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    goal: limitText(goal, 500),
+    scope,
+    risk,
+    route,
+    status: "open",
+    steps,
+    verification: null,
+    taskKey: null
+  };
+  mkdirSync(dir, { recursive: true });
+  writeJson(resolve(dir, "task.json"), task);
+  writeJson(resolve(dir, "steps.json"), { taskId: id, steps });
+  writeJson(resolve(dir, "worker-prompt.json"), buildWorkerPromptPacket(task));
+  output(taskControlPacket(task, "send_worker"));
+}
+
+function recordVerification(args) {
+  const input = parseKeyValueArgs(args);
+  const id = input.id;
+  if (!id) throw new Error("verify requires --id TASK_ID");
+  const status = normalizeVerification(input.status);
+  const task = readTask(id);
+  const verification = {
+    status,
+    command: limitText(cleanText(input.command), 300) || null,
+    exitCode: input.exitCode === undefined ? null : Number(input.exitCode),
+    note: limitText(cleanText(input.note), 500) || null,
+    recordedAt: new Date().toISOString()
+  };
+  task.verification = verification;
+  task.updatedAt = verification.recordedAt;
+  writeTask(task);
+  output({
+    ok: true,
+    taskId: task.id,
+    verification: status,
+    exitCode: verification.exitCode,
+    next: status === "pass" ? "finalize" : "fix_or_skip"
+  });
+}
+
+function checkpointStep(args) {
+  const input = parseKeyValueArgs(args);
+  const id = input.id;
+  const stepId = input.step;
+  if (!id) throw new Error("checkpoint requires --id TASK_ID");
+  if (!stepId) throw new Error("checkpoint requires --step STEP_ID");
+  const task = readTask(id);
+  const step = task.steps.find((item) => item.id === stepId);
+  if (!step) throw new Error(`Unknown step: ${stepId}`);
+  step.status = "done";
+  step.note = limitText(cleanText(input.note), 300) || null;
+  step.completedAt = new Date().toISOString();
+  task.updatedAt = step.completedAt;
+  writeTask(task);
+  const completed = task.steps.filter((item) => item.status === "done").length;
+  output({
+    ok: true,
+    taskId: task.id,
+    step: step.id,
+    status: step.status,
+    completed,
+    totalSteps: task.steps.length,
+    next: completed === task.steps.length ? "verify" : "checkpoint"
+  });
+}
+
+function finalizeTask(args) {
+  const input = parseKeyValueArgs(args);
+  const id = input.id;
+  if (!id) throw new Error("finalize requires --id TASK_ID");
+  const task = readTask(id);
+  const completed = task.steps.filter((step) => step.status === "done").length;
+  const verification = task.verification?.status ?? "unknown";
+  const done = completed === task.steps.length && ["pass", "skip"].includes(verification);
+  const taskKey = done ? task.taskKey || makeTaskKey(task) : null;
+  task.status = done ? "done" : "blocked";
+  task.taskKey = taskKey;
+  task.updatedAt = new Date().toISOString();
+  writeTask(task);
+  output({
+    ok: done,
+    taskId: task.id,
+    done,
+    taskKey,
+    completed,
+    totalSteps: task.steps.length,
+    verification,
+    next: done ? "accept" : "complete_steps_or_verify"
+  });
 }
 
 async function postSessionCommand(args, command) {
@@ -669,6 +789,22 @@ function parseMetricsArgs(args) {
   return out;
 }
 
+function parseKeyValueArgs(args) {
+  const out = {};
+  for (let i = 0; i < args.length; i += 1) {
+    const item = args[i];
+    if (!item.startsWith("--")) throw new Error(`Unexpected argument: ${item}`);
+    const key = item.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    const next = args[i + 1];
+    if (next === undefined || next.startsWith("--")) out[key] = true;
+    else {
+      out[key] = next;
+      i += 1;
+    }
+  }
+  return out;
+}
+
 function requireSessionId(args) {
   const id = args[0];
   if (!id) throw new Error("SESSION_ID required");
@@ -702,6 +838,11 @@ Usage:
   taskmarshalctl models
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
   taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE]
+  taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
+  taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]
+  taskmarshalctl checkpoint --id TASK_ID --step STEP_ID [--note TEXT]
+  taskmarshalctl verify --id TASK_ID --status pass|fail|skip [--command CMD] [--exit-code N]
+  taskmarshalctl finalize --id TASK_ID
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
@@ -897,6 +1038,159 @@ function numericOrNull(value) {
 function round(value, digits) {
   const scale = 10 ** digits;
   return Math.round(value * scale) / scale;
+}
+
+function buildRouteDecision({ input, metrics }) {
+  const goal = cleanText(input.goal);
+  const scope = splitList(input.scope);
+  const risk = normalizeRisk(input.risk);
+  const files = Number(input.files ?? scope.length) || scope.length;
+  const explicitRoute = ["local", "flash", "pro"].includes(String(input.route || "").toLowerCase())
+    ? String(input.route).toLowerCase()
+    : null;
+  const totals = metrics?.totals ?? {};
+  const reasonCodes = [];
+  let route = "local";
+  if (explicitRoute) {
+    route = explicitRoute;
+    reasonCodes.push("EXPLICIT_ROUTE");
+  } else if (risk === "high" || hasHighRiskWords(goal)) {
+    route = "pro";
+    reasonCodes.push("HIGH_RISK");
+  } else if (files >= 3 || hasDelegationWords(goal)) {
+    route = "flash";
+    reasonCodes.push(files >= 3 ? "MULTI_FILE" : "DELEGATION_FIT");
+  } else {
+    reasonCodes.push("SMALL_LOCAL");
+  }
+  if (route === "pro" && totals.unknownVerificationCount > 0) {
+    reasonCodes.push("REQUIRE_VERIFICATION_RECORD");
+  }
+  const outputBudget = totals.avgAssistantChars > 8000 ? "tight" : "short";
+  if (outputBudget === "tight") reasonCodes.push("WORKER_OUTPUT_TOO_LONG");
+  return {
+    ok: true,
+    route,
+    provider: route === "local" ? null : "reasonix",
+    model: route === "pro" ? "pro" : route === "flash" ? "flash" : null,
+    reasonCodes,
+    outputBudget,
+    maxCodexChars: 900,
+    next: route === "local" ? "do_local" : "task-create"
+  };
+}
+
+function buildTaskSteps({ goal, scope, risk, route, steps }) {
+  const provided = steps.length ? steps : [
+    "plan bounded change",
+    "implement scoped work",
+    "run verification",
+    "yield compact summary"
+  ];
+  return provided.slice(0, 8).map((description, index) => ({
+    id: `s${index + 1}`,
+    description: limitText(cleanText(description), 180),
+    status: "pending",
+    required: true
+  }));
+}
+
+function buildWorkerPromptPacket(task) {
+  return {
+    taskId: task.id,
+    goal: task.goal,
+    scope: task.scope,
+    risk: task.risk,
+    route: task.route,
+    outputContract: {
+      maxChars: 1200,
+      format: "changedFiles, commands, tests, risks, next",
+      noFullLogs: true,
+      noFullDiffs: true
+    },
+    steps: task.steps.map((step) => ({ id: step.id, description: step.description }))
+  };
+}
+
+function taskControlPacket(task, next) {
+  return {
+    ok: true,
+    taskId: task.id,
+    route: task.route,
+    risk: task.risk,
+    stepCount: task.steps.length,
+    next,
+    artifactRoot: `.taskmarshal/tasks/${task.id}`,
+    maxCodexChars: 900
+  };
+}
+
+function makeTaskId(goal) {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const slug = cleanText(goal)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "task";
+  return `${stamp}-${slug}-${randomBytes(3).toString("hex")}`;
+}
+
+function makeTaskKey(task) {
+  const body = JSON.stringify({
+    id: task.id,
+    goal: task.goal,
+    steps: task.steps.map((step) => [step.id, step.status]),
+    verification: task.verification?.status ?? null
+  });
+  return randomBytes(4).toString("hex") + Buffer.from(body).toString("base64url").slice(0, 16);
+}
+
+function taskDir(id) {
+  if (!/^[A-Za-z0-9_.-]+$/.test(id)) throw new Error("invalid task id");
+  return resolve(TASK_DIR, id);
+}
+
+function readTask(id) {
+  const task = readJsonLenient(resolve(taskDir(id), "task.json"));
+  if (!task) throw new Error(`Unknown task: ${id}`);
+  return task;
+}
+
+function writeTask(task) {
+  writeJson(resolve(taskDir(task.id), "task.json"), task);
+}
+
+function cleanText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function splitList(value) {
+  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean);
+  return String(value ?? "")
+    .split(/[,\n;]/)
+    .map(cleanText)
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function normalizeRisk(value) {
+  const risk = String(value || "medium").toLowerCase();
+  if (["low", "medium", "high"].includes(risk)) return risk;
+  return "medium";
+}
+
+function normalizeVerification(value) {
+  const status = String(value || "").toLowerCase();
+  if (!["pass", "fail", "skip"].includes(status)) throw new Error("--status must be pass, fail, or skip");
+  return status;
+}
+
+function hasHighRiskWords(text) {
+  return /\b(auth|security|secret|migration|data loss|payment|release|production|权限|密钥|迁移|安全|上线)\b/i.test(text);
+}
+
+function hasDelegationWords(text) {
+  return /\b(refactor|debug|audit|review|architecture|research|multi-file|worker|agent|调研|审查|架构|多文件|重构)\b/i.test(text);
 }
 
 function readSessionMeta(id) {

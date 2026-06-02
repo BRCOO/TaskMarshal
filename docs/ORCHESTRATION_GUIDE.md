@@ -11,6 +11,22 @@ The main token-saving rule is simple: do not use Codex as a transcript carrier.
 Codex should send a compact `TaskSpec`, observe compact session state, and read
 full logs only when debugging the worker itself.
 
+## Token Firewall
+
+Codex should exchange short control packets, not long task specs. Use:
+
+```text
+worker_route_decision(goal: "...", scope: "...", risk: "medium")
+worker_create_task(goal: "...", scope: "...", risk: "medium", route: "flash")
+worker_checkpoint_step(id: "task", step: "s1")
+worker_record_verification(id: "task", status: "pass", command: "npm test")
+worker_finalize_task(id: "task")
+```
+
+The task ledger is written under local `.taskmarshal/tasks/` and is ignored by
+git. Codex should normally read only the returned control packet and final
+taskKey.
+
 ## Delegation Packet
 
 Use `examples/task-spec.yaml` as the default worker packet. It keeps the worker

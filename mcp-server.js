@@ -23,6 +23,8 @@ const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
 const AskApproveMode = z.enum(["cancel", "once", "always", "reject"]);
 const ObserveMode = z.enum(["events", "summary", "final", "permission"]);
 const ReviewRisk = z.enum(["low", "medium", "high"]);
+const RouteRisk = z.enum(["low", "medium", "high"]);
+const VerificationStatus = z.enum(["pass", "fail", "skip"]);
 const REASONIX_MODEL_DESCRIPTION = "Optional Reasonix model override. Accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro.";
 
 const providers = [
@@ -257,6 +259,86 @@ function registerWorkerTools() {
     },
     "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions })
   }));
+
+  server.registerTool("worker_route_decision", {
+    title: "TaskMarshal Route Decision",
+    description: "Return a short deterministic Local/flash/pro routing decision.",
+    inputSchema: {
+      goal: z.string().min(1).describe("Short task goal."),
+      scope: z.string().default("").describe("Comma-separated files or modules."),
+      risk: RouteRisk.default("medium").describe("Risk level."),
+      files: z.number().int().min(0).max(200).default(0).describe("Approximate file count."),
+      route: z.enum(["local", "flash", "pro"]).optional().describe("Optional explicit route.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ goal, scope, risk, files, route }) => {
+    const args = ["route", "--goal", goal, "--risk", risk, "--files", String(files)];
+    if (scope) args.push("--scope", scope);
+    if (route) args.push("--route", route);
+    return toolResult(await runCtl(args));
+  });
+
+  server.registerTool("worker_create_task", {
+    title: "TaskMarshal Create Task",
+    description: "Create a local token-firewall task ledger and return only a short control packet.",
+    inputSchema: {
+      goal: z.string().min(1).describe("Short task goal."),
+      scope: z.string().default("").describe("Comma-separated files or modules."),
+      risk: RouteRisk.default("medium").describe("Risk level."),
+      route: z.enum(["local", "flash", "pro"]).optional().describe("Optional explicit route."),
+      steps: z.string().default("").describe("Optional semicolon-separated short steps.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ goal, scope, risk, route, steps }) => {
+    const args = ["task-create", "--goal", goal, "--risk", risk];
+    if (scope) args.push("--scope", scope);
+    if (route) args.push("--route", route);
+    if (steps) args.push("--steps", steps);
+    return toolResult(await runCtl(args));
+  });
+
+  server.registerTool("worker_record_verification", {
+    title: "TaskMarshal Record Verification",
+    description: "Record pass/fail/skip verification for a token-firewall task.",
+    inputSchema: {
+      id: z.string().min(1).describe("Task id."),
+      status: VerificationStatus.describe("Verification status."),
+      command: z.string().default("").describe("Verification command or check."),
+      exitCode: z.number().int().optional().describe("Command exit code."),
+      note: z.string().default("").describe("Short verification note.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ id, status, command, exitCode, note }) => {
+    const args = ["verify", "--id", id, "--status", status];
+    if (command) args.push("--command", command);
+    if (exitCode !== undefined) args.push("--exit-code", String(exitCode));
+    if (note) args.push("--note", note);
+    return toolResult(await runCtl(args));
+  });
+
+  server.registerTool("worker_checkpoint_step", {
+    title: "TaskMarshal Checkpoint Step",
+    description: "Mark one token-firewall task step done and return a short gate status.",
+    inputSchema: {
+      id: z.string().min(1).describe("Task id."),
+      step: z.string().min(1).describe("Step id, for example s1."),
+      note: z.string().default("").describe("Short checkpoint note.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ id, step, note }) => {
+    const args = ["checkpoint", "--id", id, "--step", step];
+    if (note) args.push("--note", note);
+    return toolResult(await runCtl(args));
+  });
+
+  server.registerTool("worker_finalize_task", {
+    title: "TaskMarshal Finalize Task",
+    description: "Finalize a token-firewall task and return a short taskKey proof when gates pass.",
+    inputSchema: {
+      id: z.string().min(1).describe("Task id.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ id }) => toolResult(await runCtl(["finalize", "--id", id])));
 
   server.registerTool("worker_plan_pro_review", {
     title: "TaskMarshal Plan Pro Review",
