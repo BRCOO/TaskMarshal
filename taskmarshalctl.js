@@ -18,6 +18,15 @@ import { dirname, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { AcpClient, compactEvent } from "./lib/acp-client.js";
+import {
+  DEFAULT_WORKER_OUTPUT_MAX_CHARS,
+  WORKER_OUTPUT_FIELDS,
+  contractPromptRecord,
+  enforceWorkerOutputContract,
+  outputContractRecord,
+  prepareWorkerPrompt,
+  resolveWorkerOutputContract
+} from "./lib/worker-output-contract.js";
 
 const VERSION = "0.1.0";
 const WORKFLOW_DIR = resolve(process.cwd(), ".taskmarshal");
@@ -41,7 +50,6 @@ const REASONIX_MODELS = [
 const REASONIX_MODEL_ALIASES = new Map(
   REASONIX_MODELS.flatMap((model) => [[model.id, model.id], ...model.aliases.map((alias) => [alias, model.id])])
 );
-
 function main() {
   const [cmd = "help", ...args] = process.argv.slice(2);
   if (cmd === "help" || cmd === "-h" || cmd === "--help") return help();
@@ -151,7 +159,8 @@ async function smoke() {
     text: "Say exactly: taskmarshalctl smoke ok. Do not use tools.",
     transcript,
     events,
-    approve: "cancel"
+    approve: "cancel",
+    outputContract: { enabled: false }
   });
   output({ ok: true, run: result });
 }
@@ -171,7 +180,8 @@ async function ask(args) {
     yolo: parsed.yolo,
     model: parsed.model,
     preset: parsed.preset,
-    budget: parsed.budget
+    budget: parsed.budget,
+    outputContract: parsed.outputContract
   });
   output(result, parsed.json);
 }
@@ -296,7 +306,12 @@ async function sendSession(args) {
   const parsed = parseSendArgs(args);
   if (!parsed.text) throw new Error("send requires text. Example: taskmarshalctl send SESSION_ID \"analyze only\"");
   const meta = readSessionMeta(parsed.id);
-  const result = await daemonRequest(meta, "POST", "/send", { text: parsed.text, wait: parsed.wait, taskId: parsed.taskId });
+  const result = await daemonRequest(meta, "POST", "/send", {
+    text: parsed.text,
+    wait: parsed.wait,
+    taskId: parsed.taskId,
+    outputContract: parsed.outputContract
+  });
   output(result);
 }
 
@@ -504,6 +519,7 @@ async function daemon(args) {
     currentTurnId: null,
     currentPrompt: null,
     currentTaskId: null,
+    currentOutputContract: null,
     assistantText: "",
     pendingPermission: null,
     permissionResolver: null,
@@ -569,20 +585,25 @@ async function daemon(args) {
         const body = await readBody(req);
         if (state.busy) return sendHttp(res, 409, { ok: false, error: "session busy", state: publicDaemonState(opts, state) });
         const turnId = randomUUID();
+        const userText = body.text || "";
+        const outputContract = resolveWorkerOutputContract(body.outputContract);
+        const preparedPrompt = prepareWorkerPrompt(userText, outputContract);
         state.busy = true;
         state.status = "running";
         state.currentTurnId = turnId;
-        state.currentPrompt = body.text || "";
+        state.currentPrompt = userText;
         state.currentTaskId = cleanTaskId(body.taskId);
+        state.currentOutputContract = preparedPrompt.outputContract;
         state.assistantText = "";
         state.currentTurnMetrics = {
           permissionRequests: 0,
           approvals: 0,
           denials: 0,
-          autoPermissions: 0
+          autoPermissions: 0,
+          outputContract: preparedPrompt.outputContract
         };
         writeDaemonMeta(metaPath, opts, state);
-        runTurn(client, opts, state, eventSink, metaPath, body.text || "", turnId).catch((err) => {
+        runTurn(client, opts, state, eventSink, metaPath, preparedPrompt, turnId).catch((err) => {
           state.errors.push({ ts: new Date().toISOString(), message: err.message });
           state.status = "error";
           state.busy = false;
@@ -647,7 +668,7 @@ async function daemon(args) {
   writeDaemonMeta(metaPath, opts, state);
 }
 
-async function runAcpTurn({ dir, text, transcript, events, approve = "cancel", yolo = false, model, preset, budget }) {
+async function runAcpTurn({ dir, text, transcript, events, approve = "cancel", yolo = false, model, preset, budget, outputContract }) {
   const acpArgs = [...REASONIX_COMMAND.prefixArgs, "acp", "--dir", dir, "--transcript", transcript];
   if (yolo) acpArgs.push("--yolo");
   if (model) acpArgs.push("--model", model);
@@ -676,7 +697,9 @@ async function runAcpTurn({ dir, text, transcript, events, approve = "cancel", y
   try {
     const init = await client.initialize();
     const session = await client.newSession({ cwd: dir });
-    const turn = await client.prompt({ sessionId: session.sessionId, text });
+    const preparedPrompt = prepareWorkerPrompt(text, resolveWorkerOutputContract(outputContract));
+    const turn = await client.prompt({ sessionId: session.sessionId, text: preparedPrompt.workerText });
+    const enforced = enforceWorkerOutputContract(assistantText.trim(), preparedPrompt.outputContract);
     const result = {
       ok: true,
       startedAt,
@@ -684,7 +707,11 @@ async function runAcpTurn({ dir, text, transcript, events, approve = "cancel", y
       dir,
       sessionId: session.sessionId,
       stopReason: turn.stopReason,
-      assistantText: assistantText.trim(),
+      promptChars: text.length,
+      workerPromptChars: preparedPrompt.workerText.length,
+      assistantText: enforced.text,
+      assistantRawChars: enforced.rawChars,
+      outputContract: outputContractRecord(preparedPrompt.outputContract, enforced),
       transcript,
       events,
       permissionRequests,
@@ -720,6 +747,7 @@ function parseAskArgs(args) {
     approve: "cancel",
     json: true,
     yolo: false,
+    outputContract: resolveWorkerOutputContract(),
     text: ""
   };
   const rest = [];
@@ -733,6 +761,8 @@ function parseAskArgs(args) {
     else if (a === "--transcript") out.transcript = resolve(args[++i]);
     else if (a === "--events") out.events = resolve(args[++i]);
     else if (a === "--yolo") out.yolo = true;
+    else if (a === "--no-output-contract") out.outputContract = { enabled: false };
+    else if (a === "--output-max-chars") out.outputContract = resolveWorkerOutputContract({ maxChars: args[++i] });
     else if (a === "--no-json") out.json = false;
     else if (a === "--json") out.json = true;
     else rest.push(a);
@@ -802,16 +832,21 @@ function parseSendArgs(args) {
   if (args.length < 2) throw new Error("send usage: taskmarshalctl send SESSION_ID \"prompt\"");
   const [id, ...rest] = args;
   let taskId = null;
+  let outputContract = resolveWorkerOutputContract();
   const text = [];
   for (let i = 0; i < rest.length; i += 1) {
     const item = rest[i];
     if (item === "--task-id") {
       taskId = rest[++i] || null;
+    } else if (item === "--no-output-contract") {
+      outputContract = { enabled: false };
+    } else if (item === "--output-max-chars") {
+      outputContract = resolveWorkerOutputContract({ maxChars: rest[++i] });
     } else {
       text.push(item);
     }
   }
-  return { id, wait: false, taskId: cleanTaskId(taskId), text: text.join(" ").trim() };
+  return { id, wait: false, taskId: cleanTaskId(taskId), outputContract, text: text.join(" ").trim() };
 }
 
 function parseInstallCodexConfigArgs(args) {
@@ -955,7 +990,7 @@ Usage:
   taskmarshalctl doctor
   taskmarshalctl models
   taskmarshalctl install-codex-config [--write-user] [--config PATH] [--server PATH] [--name taskmarshal-mcp]
-  taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
+  taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--output-max-chars N] [--no-output-contract] [--yolo]
   taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE] [--compact]
   taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
   taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]
@@ -965,7 +1000,7 @@ Usage:
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
-  taskmarshalctl send SESSION_ID [--task-id TASK_ID] "prompt"
+  taskmarshalctl send SESSION_ID [--task-id TASK_ID] [--output-max-chars N] [--no-output-contract] "prompt"
   taskmarshalctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N] [--since CURSOR]
   taskmarshalctl summarize SESSION_ID [--max-chars N]
   taskmarshalctl approve SESSION_ID
@@ -979,6 +1014,7 @@ Notes:
   ask uses Reasonix's native ACP JSON-RPC stdio agent.
   Events and transcripts are written under ~/.reasonixctl/runs by default.
   start creates a persistent local daemon backed by reasonix acp.
+  worker output contract is default-on: final worker text is capped at ${DEFAULT_WORKER_OUTPUT_MAX_CHARS} chars unless disabled.
   install-codex-config prints a minimal+compact Codex MCP config by default; --write-user updates ~/.codex/config.toml with a backup.
 `);
 }
@@ -1017,7 +1053,9 @@ function readJsonOptional(path) {
 function codexMcpEnv() {
   return {
     TASKMARSHAL_TOOL_PROFILE: "minimal",
-    TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
+    TASKMARSHAL_COMPACT_TOOL_TEXT: "1",
+    TASKMARSHAL_WORKER_OUTPUT_CONTRACT: "1",
+    TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS: String(DEFAULT_WORKER_OUTPUT_MAX_CHARS)
   };
 }
 
@@ -1031,6 +1069,8 @@ function buildCodexMcpTomlSnippet({ name, serverPath }) {
     `[mcp_servers.${name}.env]`,
     `TASKMARSHAL_TOOL_PROFILE = "minimal"`,
     `TASKMARSHAL_COMPACT_TOOL_TEXT = "1"`,
+    `TASKMARSHAL_WORKER_OUTPUT_CONTRACT = "1"`,
+    `TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS = "${DEFAULT_WORKER_OUTPUT_MAX_CHARS}"`,
     ``
   ].join("\n");
 }
@@ -1046,7 +1086,9 @@ function writeCodexMcpConfig({ configPath, name, serverPath }) {
     `mcp_servers.${name}.env`,
     {
       TASKMARSHAL_TOOL_PROFILE: `"minimal"`,
-      TASKMARSHAL_COMPACT_TOOL_TEXT: `"1"`
+      TASKMARSHAL_COMPACT_TOOL_TEXT: `"1"`,
+      TASKMARSHAL_WORKER_OUTPUT_CONTRACT: `"1"`,
+      TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS: `"${DEFAULT_WORKER_OUTPUT_MAX_CHARS}"`
     }
   );
   if (existing === next) return { changed: false, backupPath: null };
@@ -1178,7 +1220,12 @@ function normalizeMetricRecord(metric, { meta, summary, dir }) {
     stopReason: metric.stopReason ?? null,
     elapsedMs: numericOrNull(metric.elapsedMs),
     promptChars: numericOrZero(metric.promptChars),
+    workerPromptChars: numericOrZero(metric.workerPromptChars),
     assistantChars: numericOrZero(metric.assistantChars),
+    assistantRawChars: numericOrZero(metric.assistantRawChars ?? metric.assistantChars),
+    outputContractApplied: Boolean(metric.outputContractApplied ?? metric.outputContract?.enabled),
+    outputContractTruncated: Boolean(metric.outputContractTruncated ?? metric.outputContract?.truncated),
+    outputContractMaxChars: numericOrNull(metric.outputContractMaxChars ?? metric.outputContract?.maxChars),
     permissionRequests: numericOrZero(metric.permissionRequests),
     approvals: numericOrZero(metric.approvals),
     denials: numericOrZero(metric.denials),
@@ -1220,8 +1267,13 @@ function summarizeMetrics(records) {
     elapsedMs: sumBy(records, "elapsedMs"),
     avgElapsedMs: elapsedRecords.length ? Math.round(sumBy(elapsedRecords, "elapsedMs") / elapsedRecords.length) : null,
     promptChars: sumBy(records, "promptChars"),
+    workerPromptChars: sumBy(records, "workerPromptChars"),
     assistantChars: sumBy(records, "assistantChars"),
+    assistantRawChars: sumBy(records, "assistantRawChars"),
     avgAssistantChars: records.length ? Math.round(sumBy(records, "assistantChars") / records.length) : null,
+    avgAssistantRawChars: records.length ? Math.round(sumBy(records, "assistantRawChars") / records.length) : null,
+    outputContractAppliedCount: records.filter((record) => record.outputContractApplied).length,
+    outputContractTruncatedCount: records.filter((record) => record.outputContractTruncated).length,
     permissionRequests: sumBy(records, "permissionRequests"),
     autoPermissions: sumBy(records, "autoPermissions"),
     filesChangedCount: sumBy(records, "filesChangedCount"),
@@ -1254,6 +1306,9 @@ function buildMetricsGuidance(totals) {
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
     guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
   }
+  if (totals.avgAssistantRawChars && totals.avgAssistantChars && totals.avgAssistantRawChars > totals.avgAssistantChars * 2) {
+    guidance.push("Output contract is reducing worker final text; inspect raw logs only when debugging worker quality.");
+  }
   if (totals.unknownVerificationCount > 0) {
     guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
   }
@@ -1270,6 +1325,7 @@ function buildRoutingHints({ totals, taskVerification }) {
   const passCount = taskVerification.byStatus.pass || 0;
   if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (totals.outputContractTruncatedCount > 0) hints.push("review_worker_compactness");
   if (totals.unknownVerificationCount > 0) hints.push("record_verification");
   if (!hints.length) hints.push("static_route_ok");
   return hints;
@@ -1282,6 +1338,8 @@ function compactMetricRecord(record) {
     model: record.model,
     ok: record.ok,
     assistantChars: record.assistantChars,
+    assistantRawChars: record.assistantRawChars,
+    outputContractTruncated: record.outputContractTruncated,
     verification: record.verification,
     error: record.error
   };
@@ -1452,8 +1510,8 @@ function buildWorkerPromptPacket(task) {
     risk: task.risk,
     route: task.route,
     outputContract: {
-      maxChars: 1200,
-      format: "changedFiles, commands, tests, risks, next",
+      maxChars: DEFAULT_WORKER_OUTPUT_MAX_CHARS,
+      format: WORKER_OUTPUT_FIELDS.join(", "),
       noFullLogs: true,
       noFullDiffs: true
     },
@@ -1588,6 +1646,7 @@ function writeDaemonMeta(metaPath, opts, state) {
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
     currentTaskId: state.currentTaskId,
+    currentOutputContract: state.currentOutputContract,
     assistantTextPreview: state.assistantText.slice(-2000),
     pendingPermission: state.pendingPermission ? {
       id: state.pendingPermission.id,
@@ -1619,6 +1678,7 @@ function publicDaemonState(opts, state) {
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
     currentTaskId: state.currentTaskId,
+    currentOutputContract: state.currentOutputContract,
     assistantTextPreview: state.assistantText.slice(-2000),
     pendingPermission: state.pendingPermission ? {
       id: state.pendingPermission.id,
@@ -1631,18 +1691,29 @@ function publicDaemonState(opts, state) {
   };
 }
 
-async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
+async function runTurn(client, opts, state, eventSink, metaPath, preparedPrompt, turnId) {
   const startedAt = new Date().toISOString();
-  eventSink({ method: "control/send", turnId, text });
+  const text = preparedPrompt.userText;
+  eventSink({
+    method: "control/send",
+    turnId,
+    text,
+    outputContract: contractPromptRecord(preparedPrompt.outputContract)
+  });
   try {
-    const result = await client.prompt({ sessionId: state.sessionId, text });
+    const result = await client.prompt({ sessionId: state.sessionId, text: preparedPrompt.workerText });
+    const enforced = enforceWorkerOutputContract(state.assistantText.trim(), preparedPrompt.outputContract);
+    state.assistantText = enforced.text;
     const turn = {
       turnId,
       startedAt,
       finishedAt: new Date().toISOString(),
       stopReason: result.stopReason,
       promptChars: text.length,
-      assistantText: state.assistantText.trim()
+      workerPromptChars: preparedPrompt.workerText.length,
+      assistantText: enforced.text,
+      assistantRawChars: enforced.rawChars,
+      outputContract: outputContractRecord(preparedPrompt.outputContract, enforced)
     };
     const metric = buildTurnMetric({ opts, state, turn, ok: true });
     state.turns.push(turn);
@@ -1651,6 +1722,7 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
     state.currentTurnId = null;
     state.currentPrompt = null;
     state.currentTaskId = null;
+    state.currentOutputContract = null;
     state.currentTurnMetrics = null;
     state.pendingPermission = null;
     state.permissionResolver = null;
@@ -1658,19 +1730,25 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
     eventSink({ method: "control/turn_finished", turnId, stopReason: result.stopReason });
     writeDaemonMeta(metaPath, opts, state);
   } catch (err) {
+    const enforced = enforceWorkerOutputContract(state.assistantText.trim(), preparedPrompt.outputContract);
+    state.assistantText = enforced.text;
     const failedTurn = {
       turnId,
       startedAt,
       finishedAt: new Date().toISOString(),
       stopReason: "error",
       promptChars: text.length,
-      assistantText: state.assistantText.trim(),
+      workerPromptChars: preparedPrompt.workerText.length,
+      assistantText: enforced.text,
+      assistantRawChars: enforced.rawChars,
+      outputContract: outputContractRecord(preparedPrompt.outputContract, enforced),
       error: err.message
     };
     appendJsonl(opts.metrics, buildTurnMetric({ opts, state, turn: failedTurn, ok: false }));
     state.status = "ready";
     state.busy = false;
     state.currentTaskId = null;
+    state.currentOutputContract = null;
     state.currentTurnMetrics = null;
     state.errors.push({ ts: new Date().toISOString(), turnId, message: err.message });
     eventSink({ method: "control/turn_error", turnId, error: err.message });
@@ -1681,6 +1759,11 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
 function buildTurnMetric({ opts, state, turn, ok }) {
   const turnMetrics = state.currentTurnMetrics ?? {};
   const elapsedMs = turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : null;
+  const outputContract = turn.outputContract ?? outputContractRecord(turnMetrics.outputContract, {
+    text: turn.assistantText ?? "",
+    rawChars: String(turn.assistantText ?? "").length,
+    truncated: false
+  });
   return {
     ts: turn.finishedAt,
     provider: "reasonix",
@@ -1695,7 +1778,13 @@ function buildTurnMetric({ opts, state, turn, ok }) {
     stopReason: turn.stopReason,
     elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
     promptChars: turn.promptChars ?? 0,
+    workerPromptChars: turn.workerPromptChars ?? turn.promptChars ?? 0,
     assistantChars: String(turn.assistantText ?? "").length,
+    assistantRawChars: turn.assistantRawChars ?? String(turn.assistantText ?? "").length,
+    outputContract,
+    outputContractApplied: Boolean(outputContract?.enabled),
+    outputContractTruncated: Boolean(outputContract?.truncated),
+    outputContractMaxChars: outputContract?.maxChars ?? null,
     permissionRequests: turnMetrics.permissionRequests ?? 0,
     approvals: turnMetrics.approvals ?? 0,
     denials: turnMetrics.denials ?? 0,

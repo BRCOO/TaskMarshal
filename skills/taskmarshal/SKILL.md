@@ -102,6 +102,10 @@ Do not show the numeric score unless it helps explain a decision.
   task is read-only or Codex gave exact edits.
 - Ask workers to return `examples/worker-yield-summary.md` and run
   `examples/worker-self-review.md` before handoff.
+- Worker final output is capped by default. Expect only these fields:
+  `changedFiles`, `commands`, `verification`, `risks`, and `next`.
+  Default cap is 1200 characters. Use `--output-max-chars N` only when Codex
+  truly needs a larger handoff, and `--no-output-contract` only for diagnostics.
 
 ## MCP Use
 

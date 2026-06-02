@@ -40,6 +40,8 @@ For token-sensitive installations, launch the MCP server with:
 ```bash
 TASKMARSHAL_TOOL_PROFILE=minimal
 TASKMARSHAL_COMPACT_TOOL_TEXT=1
+TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1
+TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=1200
 ```
 
 For Codex, install that configuration with:
@@ -50,12 +52,15 @@ node taskmarshalctl.js install-codex-config --write-user
 
 The command writes the `taskmarshal-mcp` entry to `~/.codex/config.toml`, keeps a
 timestamped backup when replacing an existing file, and sets the minimal tool
-profile plus compact tool text by default.
+profile, compact tool text, and default worker output contract.
 
 `TASKMARSHAL_TOOL_PROFILE=minimal` exposes only the core provider controls and
 the merged task gate, and hides legacy Reasonix aliases automatically.
 `TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps full MCP `structuredContent` while
 making the visible text response a one-line summary.
+`TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1` asks workers to return only
+`changedFiles`, `commands`, `verification`, `risks`, and `next`, then caps final
+worker text before it is saved for future observations.
 
 ## Delegation Packet
 
@@ -112,6 +117,25 @@ Workers should return `examples/worker-yield-summary.md`, not long prose. Codex
 can then decide whether to inspect diffs, ask for a narrow redo, run tests, or
 finish locally.
 
+TaskMarshal enforces a default 1200-character final-output cap for Reasonix and
+Claude Code. This is intentionally a Codex-context budget, not a transcript
+retention policy: local event and transcript files remain available when the
+worker itself needs debugging.
+
+Per-turn overrides:
+
+```bash
+node taskmarshalctl.js send SESSION --output-max-chars 2000 "bounded task"
+node taskmarshalctl.js send SESSION --no-output-contract "diagnostic task"
+```
+
+Environment overrides:
+
+```bash
+TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=2000
+TASKMARSHAL_WORKER_OUTPUT_CONTRACT=0
+```
+
 ## Session Metrics
 
 Use `worker_summarize_session` after a worker turn or before final review. The
@@ -134,6 +158,9 @@ Use `worker_metrics_report` for cross-session routing evidence. It reads compact
 metrics records and session metadata, not large transcripts or event logs. The
 report includes recent turns, model/provider aggregates, average assistant
 output size, permission counts, verification coverage, and routing guidance.
+It also records `assistantRawChars`, `outputContractAppliedCount`, and
+`outputContractTruncatedCount` so Codex can see when compact final output is
+working without reading long worker text.
 Task-gate verification records are included in the same report so Codex can
 see recent pass/fail/skip outcomes without loading task ledgers.
 Use `compact: true` for normal routing checks; it returns aggregates, routing

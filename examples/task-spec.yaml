@@ -57,4 +57,12 @@ budget:
 
 output_format:
   use_template: examples/worker-yield-summary.md
-
+  max_chars: 1200
+  fields:
+    - changedFiles
+    - commands
+    - verification
+    - risks
+    - next
+  no_full_logs: true
+  no_full_diffs: true

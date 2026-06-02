@@ -1,30 +1,19 @@
 # Worker Yield Summary
 
-Use this format when handing work back to Codex. Keep it compact and factual.
+Use this format when handing work back to Codex. Keep final output under 1200
+characters unless Codex explicitly asks for more.
 
-## Result
+changedFiles:
+- path/to/file: short note
 
-- Status: done | partial | blocked | needs-approval
-- One-line outcome:
+commands:
+- command: pass | fail | skipped
 
-## Changes
+verification:
+- result: pass | fail | partial | not-run
 
-- Files changed:
-  - path/to/file:
-- Behavior changed:
+risks:
+- short residual risk or "none"
 
-## Verification
-
-- Commands run:
-  - command:
-- Result:
-
-## Risks
-
-- Known risks:
-- Assumptions:
-
-## Next Action
-
-- Recommended next step for Codex:
-
+next:
+- one recommended Codex action

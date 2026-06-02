@@ -3,6 +3,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import {
+  enforceWorkerOutputContract,
+  prepareWorkerPrompt,
+  resolveWorkerOutputContract
+} from "../lib/worker-output-contract.js";
 
 const cases = [
   {
@@ -39,6 +44,33 @@ results.push({
   error: metricsAwareRoute.error
 });
 
+const defaultContract = resolveWorkerOutputContract({}, {});
+const preparedContract = prepareWorkerPrompt("inspect the provider adapter", defaultContract);
+const longWorkerText = "changedFiles: none\ncommands: none\nverification: pending\nrisks: ".padEnd(1800, "x");
+const enforcedContract = enforceWorkerOutputContract(longWorkerText, defaultContract);
+const disabledContract = resolveWorkerOutputContract({}, { TASKMARSHAL_WORKER_OUTPUT_CONTRACT: "0" });
+results.push({
+  name: "worker output contract",
+  passed: defaultContract.enabled === true
+    && defaultContract.maxChars === 1200
+    && preparedContract.workerText.includes("Output contract:")
+    && preparedContract.workerText.includes("changedFiles, commands, verification, risks, next")
+    && enforcedContract.truncated === true
+    && enforcedContract.text.length <= defaultContract.maxChars
+    && disabledContract.enabled === false,
+  data: {
+    defaultContract,
+    injected: preparedContract.outputContract.injected,
+    enforced: {
+      rawChars: enforcedContract.rawChars,
+      finalChars: enforcedContract.text.length,
+      truncated: enforcedContract.truncated
+    },
+    disabledContract
+  },
+  error: null
+});
+
 const configPath = resolve(process.cwd(), ".taskmarshal", "eval-codex-config.toml");
 if (existsSync(configPath)) rmSync(configPath, { force: true });
 const configPrint = run(["install-codex-config"]);
@@ -68,10 +100,13 @@ results.push({
     && configWriteAgain.data?.changed === false
     && configText.includes("[mcp_servers.taskmarshal-mcp.env]")
     && configText.includes("TASKMARSHAL_COMPACT_TOOL_TEXT = \"1\"")
+    && configText.includes("TASKMARSHAL_WORKER_OUTPUT_CONTRACT = \"1\"")
+    && configText.includes("TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS = \"1200\"")
     && configMerge.ok
     && configMergeText.includes("custom = \"keep\"")
     && configMergeText.includes("EXISTING_FLAG = \"keep\"")
-    && configMergeText.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\""),
+    && configMergeText.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\"")
+    && configMergeText.includes("TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS = \"1200\""),
   data: { print: configPrint.data, write: configWrite.data, writeAgain: configWriteAgain.data, merge: configMerge.data },
   error: configPrint.error || configWrite.error || configWriteAgain.error || configMerge.error
 });

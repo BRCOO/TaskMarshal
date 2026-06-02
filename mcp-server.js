@@ -8,6 +8,12 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
+import {
+  enforceWorkerOutputContract,
+  outputContractRecord,
+  prepareWorkerPrompt,
+  resolveWorkerOutputContract
+} from "./lib/worker-output-contract.js";
 
 const VERSION = "0.1.0";
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -19,7 +25,6 @@ const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "cl
 const TOOL_PROFILE = normalizeToolProfile(process.env.TASKMARSHAL_TOOL_PROFILE);
 const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS) || TOOL_PROFILE === "minimal";
 const COMPACT_TOOL_TEXT = truthyEnv(process.env.TASKMARSHAL_COMPACT_TOOL_TEXT);
-
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
 const AskApproveMode = z.enum(["cancel", "once", "always", "reject"]);
@@ -765,10 +770,13 @@ async function claudeDoctor() {
 async function claudeAsk({ prompt, dir, approve, model, budget, yolo }) {
   const result = await runClaudePrint({ prompt, dir, approve, model, budget, yolo });
   if (!result.ok) return result;
+  const outputContract = result.data.outputContract ?? { enabled: false };
   return success({
     provider: "claude-code",
     mode: "one-shot",
     result: result.data.result,
+    assistantRawChars: result.data.assistantRawChars,
+    outputContract,
     sessionId: result.data.sessionId,
     stopReason: result.data.stopReason,
     totalCostUsd: result.data.totalCostUsd,
@@ -861,7 +869,9 @@ async function claudeSendTask({ id, prompt, taskId }) {
     stopReason: result.data.stopReason,
     sessionId: result.data.sessionId,
     totalCostUsd: result.data.totalCostUsd,
-    assistantText: result.data.result
+    assistantText: result.data.result,
+    assistantRawChars: result.data.assistantRawChars,
+    outputContract: result.data.outputContract
   };
   meta.status = "ready";
   meta.updatedAt = finishedAt;
@@ -971,6 +981,9 @@ function claudeSummarizeSession({ id, maxChars = 6000 }) {
         .filter((event) => event.method === "control/send")
         .reduce((total, event) => total + String(event.prompt || "").length, 0),
       assistantChars: assistantText.length,
+      assistantRawChars: allTurns.reduce((total, turn) => total + (Number(turn.assistantRawChars) || String(turn.assistantText || "").length), 0),
+      outputContractAppliedCount: allTurns.filter((turn) => turn.outputContract?.enabled).length,
+      outputContractTruncatedCount: allTurns.filter((turn) => turn.outputContract?.truncated).length,
       totalCostUsd: allTurns.reduce((total, turn) => total + (Number(turn.totalCostUsd) || 0), 0),
       filesChanged: [],
       verification: "unknown",
@@ -1048,6 +1061,10 @@ function claudeMetricRecords(meta) {
       elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
       promptChars: String(send?.prompt ?? "").length,
       assistantChars: String(turn.assistantText ?? "").length,
+      assistantRawChars: Number(turn.assistantRawChars) || String(turn.assistantText ?? "").length,
+      outputContractApplied: Boolean(turn.outputContract?.enabled),
+      outputContractTruncated: Boolean(turn.outputContract?.truncated),
+      outputContractMaxChars: Number(turn.outputContract?.maxChars) || null,
       permissionRequests: 0,
       approvals: 0,
       denials: 0,
@@ -1073,6 +1090,10 @@ function claudeMetricRecords(meta) {
       elapsedMs: null,
       promptChars: String(send?.prompt ?? "").length,
       assistantChars: 0,
+      assistantRawChars: 0,
+      outputContractApplied: false,
+      outputContractTruncated: false,
+      outputContractMaxChars: null,
       permissionRequests: 0,
       approvals: 0,
       denials: 0,
@@ -1096,6 +1117,10 @@ function claudeMetricRecords(meta) {
       elapsedMs: null,
       promptChars: 0,
       assistantChars: String(meta.lastTurn.assistantText ?? "").length,
+      assistantRawChars: Number(meta.lastTurn.assistantRawChars) || String(meta.lastTurn.assistantText ?? "").length,
+      outputContractApplied: Boolean(meta.lastTurn.outputContract?.enabled),
+      outputContractTruncated: Boolean(meta.lastTurn.outputContract?.truncated),
+      outputContractMaxChars: Number(meta.lastTurn.outputContract?.maxChars) || null,
       permissionRequests: 0,
       approvals: 0,
       denials: 0,
@@ -1125,7 +1150,8 @@ function claudeUnsupported(action, id) {
 
 async function runClaudePrint({ prompt, dir, approve = "cancel", model, budget, yolo = false, sessionId }) {
   const permissionMode = mapClaudePermissionMode(approve, yolo);
-  const args = ["-p", prompt, "--output-format", "json", "--permission-mode", permissionMode];
+  const preparedPrompt = prepareWorkerPrompt(prompt, resolveWorkerOutputContract());
+  const args = ["-p", preparedPrompt.workerText, "--output-format", "json", "--permission-mode", permissionMode];
   if (sessionId) args.push("--resume", sessionId);
   if (model) args.push("--model", model);
   if (budget) args.push("--max-budget-usd", String(budget));
@@ -1134,20 +1160,32 @@ async function runClaudePrint({ prompt, dir, approve = "cancel", model, budget, 
   const run = await runProcess(CLAUDE_COMMAND, [...CLAUDE_PREFIX_ARGS, ...args], { cwd: dir ? resolve(dir) : ROOT });
   const parsed = parseJson(run.stdout);
   const ok = run.exitCode === 0 && parsed && parsed.is_error !== true;
+  const rawResult = parsed?.result ?? run.stdout.trim();
+  const enforced = enforceWorkerOutputContract(rawResult, preparedPrompt.outputContract);
+  const raw = parsed
+    ? {
+        ...parsed,
+        result: enforced.text,
+        result_raw_chars: enforced.rawChars,
+        result_truncated: enforced.truncated
+      }
+    : parsed;
   return {
     ok,
     exitCode: run.exitCode,
     stdout: run.stdout,
     stderr: run.stderr,
-    error: ok ? undefined : run.stderr.trim() || parsed?.result || parsed?.api_error_status || run.stdout.trim() || "claude command failed",
+    error: ok ? undefined : run.stderr.trim() || enforced.text || parsed?.api_error_status || "claude command failed",
     data: {
       provider: "claude-code",
-      result: parsed?.result ?? run.stdout.trim(),
+      result: enforced.text,
+      assistantRawChars: enforced.rawChars,
+      outputContract: outputContractRecord(preparedPrompt.outputContract, enforced),
       sessionId: parsed?.session_id ?? null,
       stopReason: parsed?.stop_reason ?? null,
       totalCostUsd: parsed?.total_cost_usd ?? null,
       permissionMode,
-      raw: parsed
+      raw
     }
   };
 }
@@ -1379,7 +1417,11 @@ function summarizeMetrics(records) {
     avgElapsedMs: elapsedRecords.length ? Math.round(sumBy(elapsedRecords, "elapsedMs") / elapsedRecords.length) : null,
     promptChars: sumBy(records, "promptChars"),
     assistantChars: sumBy(records, "assistantChars"),
+    assistantRawChars: sumBy(records, "assistantRawChars"),
     avgAssistantChars: records.length ? Math.round(sumBy(records, "assistantChars") / records.length) : null,
+    avgAssistantRawChars: records.length ? Math.round(sumBy(records, "assistantRawChars") / records.length) : null,
+    outputContractAppliedCount: records.filter((record) => record.outputContractApplied).length,
+    outputContractTruncatedCount: records.filter((record) => record.outputContractTruncated).length,
     permissionRequests: sumBy(records, "permissionRequests"),
     autoPermissions: sumBy(records, "autoPermissions"),
     filesChangedCount: sumBy(records, "filesChangedCount"),
@@ -1412,6 +1454,9 @@ function buildMetricsGuidance(totals) {
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
     guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
   }
+  if (totals.avgAssistantRawChars && totals.avgAssistantChars && totals.avgAssistantRawChars > totals.avgAssistantChars * 2) {
+    guidance.push("Output contract is reducing worker final text; inspect raw logs only when debugging worker quality.");
+  }
   if (totals.unknownVerificationCount > 0) {
     guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
   }
@@ -1428,6 +1473,7 @@ function buildRoutingHints({ totals, taskVerification }) {
   const passCount = taskVerification.byStatus?.pass || 0;
   if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (totals.outputContractTruncatedCount > 0) hints.push("review_worker_compactness");
   if (totals.unknownVerificationCount > 0) hints.push("record_verification");
   if (!hints.length) hints.push("static_route_ok");
   return hints;
@@ -1440,6 +1486,8 @@ function compactMetricRecord(record) {
     model: record.model,
     ok: record.ok,
     assistantChars: record.assistantChars,
+    assistantRawChars: record.assistantRawChars,
+    outputContractTruncated: record.outputContractTruncated,
     verification: record.verification,
     error: record.error
   };
@@ -1529,6 +1577,10 @@ function actionAnnotations({ destructive = false, openWorld = false } = {}) {
 
 function truthyEnv(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function isFalseEnv(value) {
+  return ["0", "false", "no", "off"].includes(String(value || "").trim().toLowerCase());
 }
 
 function normalizeToolProfile(value) {

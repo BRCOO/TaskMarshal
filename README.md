@@ -63,6 +63,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Minimal MCP tool profile and compact tool text mode for lower Codex context use
 - Incremental observation cursors and compact metrics reports
 - Tail-limited metrics scans for lower filesystem and context overhead
+- Default worker output contract with 1200-character final-output cap
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -117,7 +118,10 @@ codex mcp list
 
 This writes a `taskmarshal-mcp` server entry to `~/.codex/config.toml` with
 `TASKMARSHAL_TOOL_PROFILE=minimal` and
-`TASKMARSHAL_COMPACT_TOOL_TEXT=1`. Restart Codex after changing MCP config.
+`TASKMARSHAL_COMPACT_TOOL_TEXT=1`. It also enables the default worker output
+contract with `TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1` and
+`TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=1200`. Restart Codex after changing MCP
+config.
 
 Manual registration is also supported.
 
@@ -196,6 +200,30 @@ The TaskMarshal Skill chooses between:
 - **Local Mode:** Codex handles simple work directly.
 - **Light Mode:** one bounded worker prompt.
 - **Full Marshal Mode:** Codex plans, dispatches, observes, approves, reviews, and verifies.
+
+## Token-Efficient Worker Output
+
+TaskMarshal keeps worker handoffs small by default. Reasonix and Claude Code
+prompts receive a short output contract, and final worker text is capped before
+it is persisted for later `observe final` or summary reads.
+
+Default final labels:
+
+```text
+changedFiles / commands / verification / risks / next
+```
+
+Default cap: `1200` characters. Full event/transcript logs remain local for
+debugging, but Codex should not read them during normal supervision.
+
+Controls:
+
+```bash
+TASKMARSHAL_WORKER_OUTPUT_CONTRACT=0
+TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=2000
+node taskmarshalctl.js send SESSION --output-max-chars 2000 "task"
+node taskmarshalctl.js send SESSION --no-output-contract "task"
+```
 
 ## Provider Matrix
 
