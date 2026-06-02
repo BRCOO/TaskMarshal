@@ -107,6 +107,7 @@ npm run mcp:smoke
 npm run eval
 npm run eval:tokens
 npm run eval:quality
+npm run eval:codex-ab
 ```
 
 ### 3. Register the MCP server with Codex
@@ -232,6 +233,7 @@ To quantify token-saving regressions, run:
 ```bash
 npm run eval:tokens
 npm run eval:quality
+npm run eval:codex-ab
 ```
 
 The benchmark compares standard vs minimal MCP tool-list size, event observation
@@ -245,6 +247,35 @@ verification pass rate, unknown-verification rate, redo count, average compact
 assistant output size, output-contract coverage, and compact metrics payload
 size. It is a regression gate for telemetry quality; live worker A/B quality
 still needs real task verification records.
+
+The Codex A/B benchmark compares Codex-only runs against Codex+TaskMarshal
+runs. It reports Codex input/output token savings separately from worker token
+usage, then checks quality with pass-rate, severe-issue, and redo-count
+non-inferiority budgets. The default run uses synthetic records so CI can
+verify the math. Real run records can be passed as JSONL:
+
+```bash
+npm run eval:codex-ab -- --input runs/codex-ab.jsonl
+```
+
+Each record should include:
+
+```json
+{
+  "taskId": "large-debug-001",
+  "size": "large",
+  "variant": "taskmarshal",
+  "codexInputTokens": 12000,
+  "codexOutputTokens": 2800,
+  "workerInputTokens": 9500,
+  "workerOutputTokens": 12000,
+  "passed": true,
+  "qualityScore": 0.95,
+  "severeIssues": 0,
+  "redoCount": 0,
+  "elapsedSec": 420
+}
+```
 
 ## Provider Matrix
 
