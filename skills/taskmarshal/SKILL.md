@@ -151,6 +151,10 @@ Use `worker_metrics_report` when deciding whether routing is saving tokens or
 when repeated worker turns feel too verbose, slow, or weakly verified. Prefer
 `compact: true` for normal routing checks.
 
+When editing TaskMarshal token controls, run `npm run eval:tokens` to compare
+standard vs minimal MCP tool text, events vs summary/final observation, and
+normal vs compact metrics output.
+
 For substantial delegated work, prefer the merged token-firewall gate. Codex
 should pass short fields, then rely on local task ledgers and taskKey gates:
 

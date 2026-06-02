@@ -105,6 +105,7 @@ npm install
 npm run check
 npm run mcp:smoke
 npm run eval
+npm run eval:tokens
 ```
 
 ### 3. Register the MCP server with Codex
@@ -224,6 +225,16 @@ TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=2000
 node taskmarshalctl.js send SESSION --output-max-chars 2000 "task"
 node taskmarshalctl.js send SESSION --no-output-contract "task"
 ```
+
+To quantify token-saving regressions, run:
+
+```bash
+npm run eval:tokens
+```
+
+The benchmark compares standard vs minimal MCP tool-list size, event observation
+vs summary/final observation size, and normal vs compact metrics output. It
+reports exact character counts plus an approximate token estimate.
 
 ## Provider Matrix
 

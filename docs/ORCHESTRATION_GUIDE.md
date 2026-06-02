@@ -62,6 +62,22 @@ making the visible text response a one-line summary.
 `changedFiles`, `commands`, `verification`, `risks`, and `next`, then caps final
 worker text before it is saved for future observations.
 
+Use the token-saving benchmark after changing MCP tools, observation formatting,
+metrics, or worker output contracts:
+
+```bash
+npm run eval:tokens
+```
+
+It compares:
+
+- standard vs minimal MCP tool count and tool-list character size
+- `worker_observe(mode: "events")` vs `summary` and `final`
+- normal `worker_metrics_report` vs `compact: true`
+
+The benchmark reports exact character counts and approximate token counts
+using 4 chars/token. Treat chars as the stable regression metric.
+
 ## Delegation Packet
 
 Use `examples/task-spec.yaml` as the default worker packet. It keeps the worker
