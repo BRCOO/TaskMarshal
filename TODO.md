@@ -12,6 +12,9 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add structured task-spec and worker-yield templates.
 - [x] Add compact worker observation modes so Codex does not ingest full event
   logs by default.
+- [x] Add a minimal MCP tool profile and compact tool-result text mode.
+- [x] Add a merged task gate for route/create/checkpoint/verify/finalize.
+- [x] Add a local eval suite for routing and task-gate behavior.
 - [x] Update README/docs to explain the lean Codex + structured worker protocol.
 - [x] Sync the installed local TaskMarshal skill after repo changes.
 - [x] Run local verification.
@@ -48,6 +51,15 @@ delegation more controlled, verifiable, and reusable.
 - [x] Consider `worker_summarize_session`.
   - Acceptance: Codex can request an explicit compact session state without
     parsing JSONL event history.
+- [x] Add `TASKMARSHAL_TOOL_PROFILE=minimal`.
+  - Acceptance: token-sensitive installations can expose only core provider
+    controls and the merged task gate.
+- [x] Add `TASKMARSHAL_COMPACT_TOOL_TEXT=1`.
+  - Acceptance: MCP `structuredContent` remains full while visible tool text is
+    reduced to a one-line summary.
+- [x] Add merged `worker_task_gate`.
+  - Acceptance: Codex can route, create, checkpoint, verify, and finalize a
+    task through one MCP tool in minimal profile.
 
 ## P2 - Worker Quality Gates
 
@@ -82,9 +94,15 @@ delegation more controlled, verifiable, and reusable.
 - [x] Track lightweight task metrics.
   - Suggested fields: provider, model, mode, elapsed time, approval count,
     files changed, verification result, redo count.
+- [x] Record task-gate verification into metrics.
+  - Acceptance: `worker_metrics_report` shows recent pass/fail/skip task-gate
+    evidence without reading task ledgers or transcripts.
 - [ ] Use metrics to tune routing.
   - Acceptance: future routing can prefer Local, `flash`, or `pro` based on
     measured outcomes rather than only static rules.
 - [x] Add a compact cross-session metrics report.
   - Acceptance: Codex can inspect recent turn cost and quality signals without
     loading raw event logs or transcripts.
+- [x] Add a local eval suite.
+  - Acceptance: `npm run eval` verifies representative local/flash/pro routing
+    and task-gate finalization.

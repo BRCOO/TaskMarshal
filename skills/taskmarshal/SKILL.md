@@ -114,6 +114,7 @@ Prefer provider-neutral tools:
 - `worker_observe`
 - `worker_summarize_session`
 - `worker_metrics_report`
+- `worker_task_gate`
 - `worker_route_decision`
 - `worker_create_task`
 - `worker_checkpoint_step`
@@ -142,16 +143,20 @@ views are not enough.
 Use `worker_metrics_report` when deciding whether routing is saving tokens or
 when repeated worker turns feel too verbose, slow, or weakly verified.
 
-For substantial delegated work, prefer token-firewall tools. Codex should pass
-short fields, then rely on local task ledgers and taskKey gates:
+For substantial delegated work, prefer the merged token-firewall gate. Codex
+should pass short fields, then rely on local task ledgers and taskKey gates:
 
 ```text
-worker_route_decision(goal: "...", scope: "...", risk: "medium")
-worker_create_task(goal: "...", scope: "...", risk: "medium")
-worker_checkpoint_step(id: "task", step: "s1")
-worker_record_verification(id: "task", status: "pass")
-worker_finalize_task(id: "task")
+worker_task_gate(action: "route", goal: "...", scope: "...", risk: "medium")
+worker_task_gate(action: "create", goal: "...", scope: "...", risk: "medium")
+worker_task_gate(action: "checkpoint", id: "task", step: "s1")
+worker_task_gate(action: "verify", id: "task", status: "pass")
+worker_task_gate(action: "finalize", id: "task")
 ```
+
+If only individual gate tools are available, use the equivalent
+`worker_route_decision`, `worker_create_task`, `worker_checkpoint_step`,
+`worker_record_verification`, and `worker_finalize_task` calls.
 
 Use `worker_plan_pro_review` before spending a Reasonix `pro` pass. Reserve
 `pro` for architecture, tricky debugging, security-sensitive work, uncertain

@@ -16,16 +16,33 @@ full logs only when debugging the worker itself.
 Codex should exchange short control packets, not long task specs. Use:
 
 ```text
-worker_route_decision(goal: "...", scope: "...", risk: "medium")
-worker_create_task(goal: "...", scope: "...", risk: "medium", route: "flash")
-worker_checkpoint_step(id: "task", step: "s1")
-worker_record_verification(id: "task", status: "pass", command: "npm test")
-worker_finalize_task(id: "task")
+worker_task_gate(action: "route", goal: "...", scope: "...", risk: "medium")
+worker_task_gate(action: "create", goal: "...", scope: "...", risk: "medium", route: "flash")
+worker_task_gate(action: "checkpoint", id: "task", step: "s1")
+worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm test")
+worker_task_gate(action: "finalize", id: "task")
 ```
 
 The task ledger is written under local `.taskmarshal/tasks/` and is ignored by
 git. Codex should normally read only the returned control packet and final
 taskKey.
+
+The individual gate tools remain available in the standard MCP profile for
+compatibility, but `worker_task_gate` is the preferred low-token path.
+
+## MCP Token Controls
+
+For token-sensitive installations, launch the MCP server with:
+
+```bash
+TASKMARSHAL_TOOL_PROFILE=minimal
+TASKMARSHAL_COMPACT_TOOL_TEXT=1
+```
+
+`TASKMARSHAL_TOOL_PROFILE=minimal` exposes only the core provider controls and
+the merged task gate, and hides legacy Reasonix aliases automatically.
+`TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps full MCP `structuredContent` while
+making the visible text response a one-line summary.
 
 ## Delegation Packet
 
@@ -99,6 +116,8 @@ Use `worker_metrics_report` for cross-session routing evidence. It reads compact
 metrics records and session metadata, not large transcripts or event logs. The
 report includes recent turns, model/provider aggregates, average assistant
 output size, permission counts, verification coverage, and routing guidance.
+Task-gate verification records are included in the same report so Codex can
+see recent pass/fail/skip outcomes without loading task ledgers.
 
 ## Pro Second Pass
 
@@ -125,6 +144,8 @@ keeps final acceptance authority.
 
 Set `TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS=1` before launching the MCP server
 to hide `reasonix_*` compatibility aliases and reduce MCP tool-list tokens.
+Use `TASKMARSHAL_TOOL_PROFILE=minimal` when you also want to hide nonessential
+worker tools and route all task-gate operations through `worker_task_gate`.
 
 ## Model Policy
 

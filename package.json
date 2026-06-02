@@ -31,6 +31,7 @@
   "scripts": {
     "check": "node --check taskmarshalctl.js && node --check reasonixctl.js && node --check lib/acp-client.js && node --check mcp-server.js",
     "doctor": "node taskmarshalctl.js doctor",
+    "eval": "node scripts/taskmarshal-eval.js",
     "mcp": "node mcp-server.js",
     "mcp:smoke": "node scripts/mcp-smoke.js",
     "smoke": "node taskmarshalctl.js smoke"

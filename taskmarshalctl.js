@@ -332,6 +332,17 @@ function recordVerification(args) {
   task.verification = verification;
   task.updatedAt = verification.recordedAt;
   writeTask(task);
+  appendJsonl(resolve(WORKFLOW_DIR, "task-metrics.jsonl"), {
+    ts: verification.recordedAt,
+    taskId: task.id,
+    route: task.route,
+    risk: task.risk,
+    verification: status,
+    command: verification.command,
+    exitCode: verification.exitCode,
+    stepCount: task.steps.length,
+    completedSteps: task.steps.filter((step) => step.status === "done").length
+  });
   output({
     ok: true,
     taskId: task.id,
@@ -914,6 +925,7 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
   records.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
   const recent = records.slice(0, limit);
   const totals = summarizeMetrics(records);
+  const taskVerification = summarizeTaskVerification(readJsonl(resolve(WORKFLOW_DIR, "task-metrics.jsonl")));
   return {
     ok: true,
     generatedAt: new Date().toISOString(),
@@ -922,6 +934,7 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
     totals,
     byModel: groupMetrics(records, "model"),
     byProvider: groupMetrics(records, "provider"),
+    taskVerification,
     recent,
     guidance: buildMetricsGuidance(totals)
   };
@@ -1023,6 +1036,25 @@ function buildMetricsGuidance(totals) {
   }
   if (!guidance.length) guidance.push("Metrics are healthy enough for static Local/flash/pro routing.");
   return guidance;
+}
+
+function summarizeTaskVerification(records) {
+  const valid = records.filter((record) => !record.malformed);
+  const byStatus = {};
+  for (const record of valid) {
+    const status = record.verification || "unknown";
+    byStatus[status] = (byStatus[status] || 0) + 1;
+  }
+  return {
+    count: valid.length,
+    byStatus,
+    recent: valid.slice(-5).reverse().map((record) => ({
+      taskId: record.taskId,
+      route: record.route,
+      verification: record.verification,
+      exitCode: record.exitCode ?? null
+    }))
+  };
 }
 
 function numericOrZero(value) {

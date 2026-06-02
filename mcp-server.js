@@ -16,7 +16,9 @@ const STATE_DIR = resolve(homedir(), ".taskmarshal");
 const CLAUDE_SESSION_DIR = resolve(STATE_DIR, "providers", "claude-code", "sessions");
 const CLAUDE_COMMAND = process.platform === "win32" ? "cmd.exe" : "claude";
 const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "claude"] : [];
-const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS);
+const TOOL_PROFILE = normalizeToolProfile(process.env.TASKMARSHAL_TOOL_PROFILE);
+const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS) || TOOL_PROFILE === "minimal";
+const COMPACT_TOOL_TEXT = truthyEnv(process.env.TASKMARSHAL_COMPACT_TOOL_TEXT);
 
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
@@ -97,13 +99,14 @@ registerWorkerTools();
 if (!HIDE_LEGACY_REASONIX_TOOLS) registerReasonixCompatTools();
 
 function registerWorkerTools() {
+  const enabled = (name) => toolEnabled(name);
   server.registerTool("worker_list_providers", {
     title: "TaskMarshal List Providers",
     description: "List local CLI coding-agent providers available to TaskMarshal.",
     annotations: readOnlyAnnotations()
   }, async () => toolResult(success({ providers })));
 
-  server.registerTool("worker_doctor", {
+  if (enabled("worker_doctor")) server.registerTool("worker_doctor", {
     title: "TaskMarshal Provider Doctor",
     description: "Check a provider installation and configuration.",
     inputSchema: {
@@ -115,7 +118,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeDoctor()
   }));
 
-  server.registerTool("worker_ask", {
+  if (enabled("worker_ask")) server.registerTool("worker_ask", {
     title: "TaskMarshal One-Shot Ask",
     description: "Run a short single prompt with a worker provider. Avoid for long repo audits or slow investigations; use worker_start_session, worker_send_task, and worker_observe instead.",
     inputSchema: {
@@ -170,7 +173,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeStartSession({ id, dir, approve, model, budget, yolo })
   }));
 
-  server.registerTool("worker_list_sessions", {
+  if (enabled("worker_list_sessions")) server.registerTool("worker_list_sessions", {
     title: "TaskMarshal List Worker Sessions",
     description: "List known persistent worker sessions and whether their daemons are alive.",
     inputSchema: {
@@ -182,7 +185,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeListSessions()
   }));
 
-  server.registerTool("worker_status", {
+  if (enabled("worker_status")) server.registerTool("worker_status", {
     title: "TaskMarshal Worker Session Status",
     description: "Get detailed state for a persistent worker session, including pending permission requests.",
     inputSchema: {
@@ -225,7 +228,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeObserve({ id, tail, mode, maxChars })
   }));
 
-  server.registerTool("worker_summarize_session", {
+  if (enabled("worker_summarize_session")) server.registerTool("worker_summarize_session", {
     title: "TaskMarshal Summarize Worker Session",
     description: "Return a compact session summary and lightweight metrics without replaying full event logs.",
     inputSchema: {
@@ -260,7 +263,28 @@ function registerWorkerTools() {
     "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions })
   }));
 
-  server.registerTool("worker_route_decision", {
+  server.registerTool("worker_task_gate", {
+    title: "TaskMarshal Task Gate",
+    description: "Merged token-firewall task gate: route, create, checkpoint, verify, or finalize.",
+    inputSchema: {
+      action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).describe("Gate action."),
+      goal: z.string().default("").describe("Short task goal for route/create."),
+      scope: z.string().default("").describe("Comma-separated files or modules."),
+      risk: RouteRisk.default("medium").describe("Risk level."),
+      files: z.number().int().min(0).max(200).default(0).describe("Approximate file count for route."),
+      route: z.enum(["local", "flash", "pro"]).optional().describe("Optional explicit route."),
+      steps: z.string().default("").describe("Optional semicolon-separated short steps for create."),
+      id: z.string().default("").describe("Task id for checkpoint/verify/finalize."),
+      step: z.string().default("").describe("Step id for checkpoint."),
+      status: VerificationStatus.optional().describe("Verification status for verify."),
+      command: z.string().default("").describe("Verification command for verify."),
+      exitCode: z.number().int().optional().describe("Command exit code for verify."),
+      note: z.string().default("").describe("Short note.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async (input) => toolResult(await runTaskGate(input)));
+
+  if (enabled("worker_route_decision")) server.registerTool("worker_route_decision", {
     title: "TaskMarshal Route Decision",
     description: "Return a short deterministic Local/flash/pro routing decision.",
     inputSchema: {
@@ -278,7 +302,7 @@ function registerWorkerTools() {
     return toolResult(await runCtl(args));
   });
 
-  server.registerTool("worker_create_task", {
+  if (enabled("worker_create_task")) server.registerTool("worker_create_task", {
     title: "TaskMarshal Create Task",
     description: "Create a local token-firewall task ledger and return only a short control packet.",
     inputSchema: {
@@ -297,7 +321,7 @@ function registerWorkerTools() {
     return toolResult(await runCtl(args));
   });
 
-  server.registerTool("worker_record_verification", {
+  if (enabled("worker_record_verification")) server.registerTool("worker_record_verification", {
     title: "TaskMarshal Record Verification",
     description: "Record pass/fail/skip verification for a token-firewall task.",
     inputSchema: {
@@ -316,7 +340,7 @@ function registerWorkerTools() {
     return toolResult(await runCtl(args));
   });
 
-  server.registerTool("worker_checkpoint_step", {
+  if (enabled("worker_checkpoint_step")) server.registerTool("worker_checkpoint_step", {
     title: "TaskMarshal Checkpoint Step",
     description: "Mark one token-firewall task step done and return a short gate status.",
     inputSchema: {
@@ -331,7 +355,7 @@ function registerWorkerTools() {
     return toolResult(await runCtl(args));
   });
 
-  server.registerTool("worker_finalize_task", {
+  if (enabled("worker_finalize_task")) server.registerTool("worker_finalize_task", {
     title: "TaskMarshal Finalize Task",
     description: "Finalize a token-firewall task and return a short taskKey proof when gates pass.",
     inputSchema: {
@@ -340,7 +364,7 @@ function registerWorkerTools() {
     annotations: readOnlyAnnotations()
   }, async ({ id }) => toolResult(await runCtl(["finalize", "--id", id])));
 
-  server.registerTool("worker_plan_pro_review", {
+  if (enabled("worker_plan_pro_review")) server.registerTool("worker_plan_pro_review", {
     title: "TaskMarshal Plan Pro Review",
     description: "Create a bounded DeepSeek v4 pro second-pass review task for high-risk, architecture, tricky debugging, or final verification work.",
     inputSchema: {
@@ -392,7 +416,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeUnsupported("external permission denial", id)
   }));
 
-  server.registerTool("worker_cancel", {
+  if (enabled("worker_cancel")) server.registerTool("worker_cancel", {
     title: "TaskMarshal Cancel Turn",
     description: "Cancel the currently running turn in a persistent worker session.",
     inputSchema: {
@@ -588,6 +612,60 @@ async function routeProvider(provider, handlers) {
   } catch (err) {
     return toolResult(failure(err.message || String(err)));
   }
+}
+
+async function runTaskGate(input) {
+  const action = input.action;
+  if (action === "route") {
+    const missing = missingFields(input, ["goal"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate route: ${missing.join(", ")}`);
+    const args = ["route", "--goal", input.goal, "--risk", input.risk, "--files", String(input.files)];
+    if (input.scope) args.push("--scope", input.scope);
+    if (input.route) args.push("--route", input.route);
+    return tagTaskGateResult(action, await runCtl(args));
+  }
+  if (action === "create") {
+    const missing = missingFields(input, ["goal"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate create: ${missing.join(", ")}`);
+    const args = ["task-create", "--goal", input.goal, "--risk", input.risk];
+    if (input.scope) args.push("--scope", input.scope);
+    if (input.route) args.push("--route", input.route);
+    if (input.steps) args.push("--steps", input.steps);
+    return tagTaskGateResult(action, await runCtl(args));
+  }
+  if (action === "checkpoint") {
+    const missing = missingFields(input, ["id", "step"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate checkpoint: ${missing.join(", ")}`);
+    const args = ["checkpoint", "--id", input.id, "--step", input.step];
+    if (input.note) args.push("--note", input.note);
+    return tagTaskGateResult(action, await runCtl(args));
+  }
+  if (action === "verify") {
+    const missing = missingFields(input, ["id"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate verify: ${missing.join(", ")}`);
+    const args = ["verify", "--id", input.id, "--status", input.status || "skip"];
+    if (input.command) args.push("--command", input.command);
+    if (input.exitCode !== undefined) args.push("--exit-code", String(input.exitCode));
+    if (input.note) args.push("--note", input.note);
+    return tagTaskGateResult(action, await runCtl(args));
+  }
+  if (action === "finalize") {
+    const missing = missingFields(input, ["id"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate finalize: ${missing.join(", ")}`);
+    return tagTaskGateResult(action, await runCtl(["finalize", "--id", input.id]));
+  }
+  return failure(`Unsupported task gate action: ${action}`);
+}
+
+function missingFields(input, fields) {
+  return fields.filter((field) => !String(input[field] || "").trim());
+}
+
+function tagTaskGateResult(action, result) {
+  if (result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+    return { ...result, data: { action, ...result.data } };
+  }
+  return result;
 }
 
 async function claudeDoctor() {
@@ -1263,12 +1341,23 @@ function toolResult(result) {
     content: [
       {
         type: "text",
-        text: JSON.stringify(structuredContent, null, 2)
+        text: COMPACT_TOOL_TEXT ? compactToolText(structuredContent) : JSON.stringify(structuredContent, null, 2)
       }
     ],
     structuredContent,
     isError: !structuredContent.ok
   };
+}
+
+function compactToolText(result) {
+  const data = result.data ?? {};
+  if (!result.ok) return `error ${result.error || "unknown"}`;
+  const parts = ["ok"];
+  for (const key of ["action", "route", "taskId", "next", "status", "verification", "done", "taskKey"]) {
+    if (data[key] !== undefined && data[key] !== null) parts.push(`${key}=${data[key]}`);
+  }
+  if (data.reasonCodes?.length) parts.push(`reasons=${data.reasonCodes.join(",")}`);
+  return parts.join(" ");
 }
 
 function sanitizeRunResult(result) {
@@ -1303,6 +1392,29 @@ function actionAnnotations({ destructive = false, openWorld = false } = {}) {
 
 function truthyEnv(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function normalizeToolProfile(value) {
+  const profile = String(value || "standard").trim().toLowerCase();
+  if (profile === "admin") return "full";
+  if (["minimal", "standard", "full"].includes(profile)) return profile;
+  return "standard";
+}
+
+function toolEnabled(name) {
+  if (TOOL_PROFILE === "full" || TOOL_PROFILE === "standard") return true;
+  const minimal = new Set([
+    "worker_doctor",
+    "worker_start_session",
+    "worker_send_task",
+    "worker_observe",
+    "worker_metrics_report",
+    "worker_task_gate",
+    "worker_approve",
+    "worker_deny",
+    "worker_stop"
+  ]);
+  return minimal.has(name);
 }
 
 async function main() {

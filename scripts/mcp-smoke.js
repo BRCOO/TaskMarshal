@@ -3,10 +3,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const hideLegacy = process.argv.includes("--hide-legacy");
+const profileArg = process.argv.find((arg) => arg.startsWith("--profile="));
+const profile = profileArg ? profileArg.split("=")[1] : null;
+const compactText = process.argv.includes("--compact-text");
 const client = new Client({ name: "taskmarshal-smoke", version: "0.1.0" }, { capabilities: {} });
-const env = hideLegacy
-  ? { ...process.env, TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS: "1" }
-  : process.env;
+const env = {
+  ...process.env,
+  ...(hideLegacy ? { TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS: "1" } : {}),
+  ...(profile ? { TASKMARSHAL_TOOL_PROFILE: profile } : {}),
+  ...(compactText ? { TASKMARSHAL_COMPACT_TOOL_TEXT: "1" } : {})
+};
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["mcp-server.js"],
@@ -26,8 +32,9 @@ const metricsReport = await client.callTool({
   }
 });
 const routeDecision = await client.callTool({
-  name: "worker_route_decision",
+  name: "worker_task_gate",
   arguments: {
+    action: "route",
     goal: "Smoke-test token firewall.",
     scope: "taskmarshalctl.js,mcp-server.js",
     risk: "low",
@@ -35,8 +42,9 @@ const routeDecision = await client.callTool({
   }
 });
 const taskCreate = await client.callTool({
-  name: "worker_create_task",
+  name: "worker_task_gate",
   arguments: {
+    action: "create",
     goal: "Smoke-test token firewall.",
     scope: "taskmarshalctl.js,mcp-server.js",
     risk: "low",
@@ -44,7 +52,7 @@ const taskCreate = await client.callTool({
     steps: "plan;verify"
   }
 });
-const proReviewPlan = await client.callTool({
+const proReviewPlan = profile === "minimal" ? null : await client.callTool({
   name: "worker_plan_pro_review",
   arguments: {
     goal: "Smoke-test pro review planning.",
@@ -54,6 +62,7 @@ const proReviewPlan = await client.callTool({
 const hasWorkerSendTask = tools.tools.some((tool) => tool.name === "worker_send_task");
 const hasWorkerSummarizeSession = tools.tools.some((tool) => tool.name === "worker_summarize_session");
 const hasWorkerMetricsReport = tools.tools.some((tool) => tool.name === "worker_metrics_report");
+const hasWorkerTaskGate = tools.tools.some((tool) => tool.name === "worker_task_gate");
 const hasWorkerRouteDecision = tools.tools.some((tool) => tool.name === "worker_route_decision");
 const hasWorkerCreateTask = tools.tools.some((tool) => tool.name === "worker_create_task");
 const hasWorkerCheckpointStep = tools.tools.some((tool) => tool.name === "worker_checkpoint_step");
@@ -76,32 +85,35 @@ const hasUsableRouteDecision = ["local", "flash", "pro"].includes(routeData?.rou
 const taskData = taskCreate.structuredContent?.data;
 const taskId = taskData?.taskId;
 const checkpointOne = taskId ? await client.callTool({
-  name: "worker_checkpoint_step",
+  name: "worker_task_gate",
   arguments: {
+    action: "checkpoint",
     id: taskId,
     step: "s1",
     note: "smoke"
   }
 }) : null;
 const checkpointTwo = taskId ? await client.callTool({
-  name: "worker_checkpoint_step",
+  name: "worker_task_gate",
   arguments: {
+    action: "checkpoint",
     id: taskId,
     step: "s2",
     note: "smoke"
   }
 }) : null;
 const verifyResult = taskId ? await client.callTool({
-  name: "worker_record_verification",
+  name: "worker_task_gate",
   arguments: {
+    action: "verify",
     id: taskId,
     status: "pass",
     command: "smoke"
   }
 }) : null;
 const finalizeResult = taskId ? await client.callTool({
-  name: "worker_finalize_task",
-  arguments: { id: taskId }
+  name: "worker_task_gate",
+  arguments: { action: "finalize", id: taskId }
 }) : null;
 const verifyData = verifyResult?.structuredContent?.data;
 const checkpointData = checkpointTwo?.structuredContent?.data;
@@ -112,32 +124,36 @@ const hasUsableTaskGate = Boolean(taskId)
   && verifyData?.verification === "pass"
   && finalizeData?.done === true
   && typeof finalizeData?.taskKey === "string";
-const proReviewData = proReviewPlan.structuredContent?.data;
+const proReviewData = proReviewPlan?.structuredContent?.data;
+const compactTextOk = !compactText || routeDecision.content?.[0]?.text?.startsWith("ok ");
 const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
   && proReviewData?.model === "deepseek-v4-pro"
   && proReviewData?.startSession?.model === "pro"
   && typeof proReviewData?.prompt === "string"
   && proReviewData.prompt.includes("second-pass reviewer");
+const expectsLegacyHidden = hideLegacy || profile === "minimal";
 
 const ok = hasWorkerSendTask
-    && hasWorkerSummarizeSession
+    && (profile === "minimal" || hasWorkerSummarizeSession)
     && hasWorkerMetricsReport
     && hasUsableMetricsReport
-    && hasWorkerRouteDecision
+    && hasWorkerTaskGate
     && hasUsableRouteDecision
-    && hasWorkerCreateTask
-    && hasWorkerCheckpointStep
-    && hasWorkerRecordVerification
-    && hasWorkerFinalizeTask
+    && (profile === "minimal" || hasWorkerRouteDecision)
+    && (profile === "minimal" || hasWorkerCreateTask)
+    && (profile === "minimal" || hasWorkerCheckpointStep)
+    && (profile === "minimal" || hasWorkerRecordVerification)
+    && (profile === "minimal" || hasWorkerFinalizeTask)
     && hasUsableTaskGate
-    && hasWorkerPlanProReview
-    && hasUsableProReviewPlan
-    && (!hideLegacy || !hasReasonixAlias)
-    && (!hideLegacy || !hasReasonixSummarizeAlias)
-    && (!hideLegacy || !hasReasonixMetricsAlias)
-    && (hideLegacy || hasReasonixAlias)
-    && (hideLegacy || hasReasonixSummarizeAlias)
-    && (hideLegacy || hasReasonixMetricsAlias)
+    && (profile === "minimal" || hasWorkerPlanProReview)
+    && (profile === "minimal" || hasUsableProReviewPlan)
+    && compactTextOk
+    && (!expectsLegacyHidden || !hasReasonixAlias)
+    && (!expectsLegacyHidden || !hasReasonixSummarizeAlias)
+    && (!expectsLegacyHidden || !hasReasonixMetricsAlias)
+    && (expectsLegacyHidden || hasReasonixAlias)
+    && (expectsLegacyHidden || hasReasonixSummarizeAlias)
+    && (expectsLegacyHidden || hasReasonixMetricsAlias)
     && providerIds.includes("reasonix")
     && providerIds.includes("claude-code")
     && reasonixModels.includes("deepseek-v4-flash")
@@ -147,10 +163,15 @@ console.log(JSON.stringify({
   ok,
   toolCount: tools.tools.length,
   hideLegacy,
+  expectsLegacyHidden,
+  profile,
+  compactText,
+  compactTextOk,
   hasWorkerSendTask,
   hasWorkerSummarizeSession,
   hasWorkerMetricsReport,
   hasUsableMetricsReport,
+  hasWorkerTaskGate,
   hasWorkerRouteDecision,
   hasUsableRouteDecision,
   hasWorkerCreateTask,

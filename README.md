@@ -58,6 +58,8 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Session summaries with lightweight task metrics
 - Cross-session metrics reports for routing and token-efficiency tuning
 - Token-firewall task gates with short control packets and task keys
+- Merged `worker_task_gate` for route/create/checkpoint/verify/finalize control
+- Minimal MCP tool profile and compact tool text mode for lower Codex context use
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -98,6 +100,7 @@ cd TaskMarshal
 npm install
 npm run check
 npm run mcp:smoke
+npm run eval
 ```
 
 ### 3. Register the MCP server with Codex
@@ -203,6 +206,7 @@ Provider-neutral tools:
 | `worker_observe` | Read recent worker events. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
+| `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, and finalize. |
 | `worker_route_decision` | Return a short deterministic Local/flash/pro routing decision. |
 | `worker_create_task` | Create a local token-firewall task ledger and return a short control packet. |
 | `worker_checkpoint_step` | Mark one task step done. |
@@ -266,6 +270,19 @@ Set `TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS=1` before launching
 `taskmarshal-mcp` to hide the `reasonix_*` compatibility tools and reduce the
 MCP tool list. The provider-neutral `worker_*` tools remain available.
 
+For the smallest Codex tool-list and tool-result footprint, launch the MCP
+server with:
+
+```bash
+TASKMARSHAL_TOOL_PROFILE=minimal
+TASKMARSHAL_COMPACT_TOOL_TEXT=1
+```
+
+`minimal` exposes the core provider tools plus `worker_task_gate` and hides
+legacy Reasonix aliases automatically. `TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps
+full `structuredContent` for clients, but reduces the visible text result to a
+one-line control summary.
+
 ## Direct CLI Usage
 
 Use the Reasonix adapter without MCP:
@@ -311,16 +328,16 @@ Claude Code does not expose an external permission callback to TaskMarshal. `wor
 
 The economical TaskMarshal loop is:
 
-1. Codex asks `worker_route_decision` for a short Local/flash/pro decision.
-2. Codex calls `worker_create_task` with only short fields.
+1. Codex calls `worker_task_gate(action: "route")` for a short Local/flash/pro decision.
+2. Codex calls `worker_task_gate(action: "create")` with only short fields.
 3. Worker returns a short plan before edits for Full Marshal tasks.
 4. Codex observes with `mode: "summary"` or `mode: "permission"`.
 5. Codex asks `worker_summarize_session` for a compact digest and metrics when
    the worker finishes.
 6. Codex checks `worker_metrics_report` when routing quality or token cost
    needs evidence.
-7. Codex records verification with `worker_record_verification`.
-8. Codex finalizes with `worker_finalize_task` and accepts only with a taskKey.
+7. Codex records verification with `worker_task_gate(action: "verify")`.
+8. Codex finalizes with `worker_task_gate(action: "finalize")` and accepts only with a taskKey.
 
 Task ledgers are written under local `.taskmarshal/tasks/` and are gitignored.
 MCP tools return short control packets by default; large task artifacts stay on
@@ -340,7 +357,8 @@ verification placeholders for future routing feedback.
 
 Use `worker_metrics_report` or `taskmarshalctl metrics --limit 20` to inspect
 recent turns without loading raw `events.jsonl` or transcripts into Codex
-context.
+context. Verification records from task gates are included in the metrics
+report, so routing quality can be judged from local pass/fail/skip evidence.
 
 Templates:
 
@@ -395,6 +413,7 @@ Recommended pre-push checks:
 git status --short
 npm run check
 npm run mcp:smoke
+npm run eval
 git grep -n -E "sk-[A-Za-z0-9_-]{20,}|api[_-]?key|token|secret|password" -- .
 ```
 
@@ -410,6 +429,7 @@ The grep may match documentation or source identifiers. Review matches before co
 ├── lib/acp-client.js             # ACP JSON-RPC client
 ├── skills/taskmarshal/           # Codex Skill
 ├── scripts/mcp-smoke.js          # MCP smoke test
+├── scripts/taskmarshal-eval.js   # Local routing and task-gate evals
 └── examples/                     # Example config and worker prompt
 ```
 
