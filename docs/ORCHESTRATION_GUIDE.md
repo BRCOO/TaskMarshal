@@ -135,16 +135,24 @@ compact evidence. Static rules still decide the baseline Local / flash / pro
 route, then metrics can tighten the output budget or upgrade `flash` to `pro`
 when recent worker verification or failure history shows elevated risk.
 
-When a task gate verifies worker output, include the worker session and turn
-when available:
+When dispatching a token-firewall task, include the task id on the worker turn:
+
+```text
+worker_send_task(provider: "reasonix", id: "audit", taskId: "task", prompt: "<bounded task prompt>")
+```
+
+Session metrics keep that task id, and `worker_metrics_report` automatically
+merges later task-gate verification records by task id.
+
+For worker turns that were sent without a task id, include the worker session
+and turn when verifying:
 
 ```text
 worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm test", session: "audit", turnId: "TURN_ID")
 ```
 
-This updates the matching session metric from `unknown` to pass/fail/skip, so
-future routing decisions are based on verified worker outcomes instead of only
-static heuristics.
+Both paths reduce `unknown` verification counts, so future routing decisions are
+based on verified worker outcomes instead of only static heuristics.
 
 ## Pro Second Pass
 

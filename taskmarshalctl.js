@@ -256,7 +256,7 @@ async function sendSession(args) {
   const parsed = parseSendArgs(args);
   if (!parsed.text) throw new Error("send requires text. Example: taskmarshalctl send SESSION_ID \"analyze only\"");
   const meta = readSessionMeta(parsed.id);
-  const result = await daemonRequest(meta, "POST", "/send", { text: parsed.text, wait: parsed.wait });
+  const result = await daemonRequest(meta, "POST", "/send", { text: parsed.text, wait: parsed.wait, taskId: parsed.taskId });
   output(result);
 }
 
@@ -463,6 +463,7 @@ async function daemon(args) {
     busy: false,
     currentTurnId: null,
     currentPrompt: null,
+    currentTaskId: null,
     assistantText: "",
     pendingPermission: null,
     permissionResolver: null,
@@ -532,6 +533,7 @@ async function daemon(args) {
         state.status = "running";
         state.currentTurnId = turnId;
         state.currentPrompt = body.text || "";
+        state.currentTaskId = cleanTaskId(body.taskId);
         state.assistantText = "";
         state.currentTurnMetrics = {
           permissionRequests: 0,
@@ -759,7 +761,17 @@ function parseDaemonArgs(args) {
 function parseSendArgs(args) {
   if (args.length < 2) throw new Error("send usage: taskmarshalctl send SESSION_ID \"prompt\"");
   const [id, ...rest] = args;
-  return { id, wait: false, text: rest.join(" ").trim() };
+  let taskId = null;
+  const text = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const item = rest[i];
+    if (item === "--task-id") {
+      taskId = rest[++i] || null;
+    } else {
+      text.push(item);
+    }
+  }
+  return { id, wait: false, taskId: cleanTaskId(taskId), text: text.join(" ").trim() };
 }
 
 function parseObserveArgs(args) {
@@ -893,7 +905,7 @@ Usage:
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
-  taskmarshalctl send SESSION_ID "prompt"
+  taskmarshalctl send SESSION_ID [--task-id TASK_ID] "prompt"
   taskmarshalctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N] [--since CURSOR]
   taskmarshalctl summarize SESSION_ID [--max-chars N]
   taskmarshalctl approve SESSION_ID
@@ -959,13 +971,12 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
       records.push(row);
     }
   }
+  const taskMetricRecords = readJsonlTail(resolve(WORKFLOW_DIR, "task-metrics.jsonl"), compact ? 500 : 2000);
+  applyTaskVerificationToMetrics(records, taskMetricRecords);
   records.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
   const recent = records.slice(0, limit);
   const totals = summarizeMetrics(records);
-  const taskVerification = summarizeTaskVerification(
-    readJsonlTail(resolve(WORKFLOW_DIR, "task-metrics.jsonl"), compact ? 500 : 2000),
-    { compact }
-  );
+  const taskVerification = summarizeTaskVerification(taskMetricRecords, { compact });
   const report = {
     ok: true,
     generatedAt: new Date().toISOString(),
@@ -1019,6 +1030,7 @@ function normalizeMetricRecord(metric, { meta, summary, dir }) {
     session: metric.session ?? meta?.id ?? summary?.id ?? dirname(dir),
     model: metric.model ?? meta?.model ?? summary?.model ?? null,
     approveMode: metric.approveMode ?? meta?.approve ?? summary?.metrics?.approveMode ?? null,
+    taskId: metric.taskId ?? null,
     ok: metric.ok ?? null,
     stopReason: metric.stopReason ?? null,
     elapsedMs: numericOrNull(metric.elapsedMs),
@@ -1033,6 +1045,24 @@ function normalizeMetricRecord(metric, { meta, summary, dir }) {
     redoCount: numericOrZero(metric.redoCount),
     error: metric.error ?? null
   };
+}
+
+function applyTaskVerificationToMetrics(records, taskMetricRecords) {
+  const byTask = new Map();
+  for (const record of taskMetricRecords) {
+    if (record.malformed || !record.taskId || !["pass", "fail", "skip"].includes(record.verification)) continue;
+    const existing = byTask.get(record.taskId);
+    if (!existing || String(record.ts || "").localeCompare(String(existing.ts || "")) > 0) {
+      byTask.set(record.taskId, record);
+    }
+  }
+  for (const record of records) {
+    if (record.verification !== "unknown" || !record.taskId) continue;
+    const verified = byTask.get(record.taskId);
+    if (!verified) continue;
+    record.verification = verified.verification;
+    record.verifiedAt = verified.ts ?? null;
+  }
 }
 
 function summarizeMetrics(records) {
@@ -1115,7 +1145,7 @@ function compactMetricRecord(record) {
 }
 
 function summarizeTaskVerification(records, { compact = false } = {}) {
-  const valid = records.filter((record) => !record.malformed);
+  const valid = latestTaskVerificationRecords(records.filter((record) => !record.malformed));
   const byStatus = {};
   for (const record of valid) {
     const status = record.verification || "unknown";
@@ -1136,6 +1166,22 @@ function summarizeTaskVerification(records, { compact = false } = {}) {
       exitCode: record.exitCode ?? null
   }));
   return summary;
+}
+
+function latestTaskVerificationRecords(records) {
+  const keyed = new Map();
+  const unkeyed = [];
+  for (const record of records) {
+    if (!record.taskId) {
+      unkeyed.push(record);
+      continue;
+    }
+    const existing = keyed.get(record.taskId);
+    if (!existing || String(record.ts || "").localeCompare(String(existing.ts || "")) > 0) {
+      keyed.set(record.taskId, record);
+    }
+  }
+  return [...unkeyed, ...keyed.values()];
 }
 
 function numericOrZero(value) {
@@ -1345,6 +1391,11 @@ function normalizeVerification(value) {
   return status;
 }
 
+function cleanTaskId(value) {
+  const id = cleanText(value);
+  return /^[A-Za-z0-9_.-]+$/.test(id) ? id : null;
+}
+
 function hasHighRiskWords(text) {
   return /\b(auth|security|secret|migration|data loss|payment|release|production|权限|密钥|迁移|安全|上线)\b/i.test(text);
 }
@@ -1393,6 +1444,7 @@ function writeDaemonMeta(metaPath, opts, state) {
     sessionId: state.sessionId ?? previous.sessionId ?? null,
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
+    currentTaskId: state.currentTaskId,
     assistantTextPreview: state.assistantText.slice(-2000),
     pendingPermission: state.pendingPermission ? {
       id: state.pendingPermission.id,
@@ -1423,6 +1475,7 @@ function publicDaemonState(opts, state) {
     sessionId: state.sessionId,
     currentTurnId: state.currentTurnId,
     currentPrompt: state.currentPrompt,
+    currentTaskId: state.currentTaskId,
     assistantTextPreview: state.assistantText.slice(-2000),
     pendingPermission: state.pendingPermission ? {
       id: state.pendingPermission.id,
@@ -1454,6 +1507,7 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
     state.busy = false;
     state.currentTurnId = null;
     state.currentPrompt = null;
+    state.currentTaskId = null;
     state.currentTurnMetrics = null;
     state.pendingPermission = null;
     state.permissionResolver = null;
@@ -1473,6 +1527,7 @@ async function runTurn(client, opts, state, eventSink, metaPath, text, turnId) {
     appendJsonl(opts.metrics, buildTurnMetric({ opts, state, turn: failedTurn, ok: false }));
     state.status = "ready";
     state.busy = false;
+    state.currentTaskId = null;
     state.currentTurnMetrics = null;
     state.errors.push({ ts: new Date().toISOString(), turnId, message: err.message });
     eventSink({ method: "control/turn_error", turnId, error: err.message });
@@ -1492,6 +1547,7 @@ function buildTurnMetric({ opts, state, turn, ok }) {
     budget: opts.budget ?? null,
     approveMode: opts.approve,
     turnId: turn.turnId,
+    taskId: cleanTaskId(state.currentTaskId),
     ok,
     stopReason: turn.stopReason,
     elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
@@ -1591,6 +1647,7 @@ function readJsonl(path) {
 function updateSessionMetricVerification({ sessionId, turnId, taskId, verification, verifiedAt }) {
   if (!sessionId) return { ok: false, reason: "no_session" };
   if (!/^[A-Za-z0-9_.-]+$/.test(sessionId)) return { ok: false, reason: "invalid_session" };
+  if (!turnId) return { ok: false, reason: "turn_id_required" };
   const metricsPath = resolve(SESSION_DIR, sessionId, "metrics.jsonl");
   if (!existsSync(metricsPath)) return { ok: false, reason: "metrics_not_found" };
   const records = readJsonl(metricsPath);
@@ -1598,10 +1655,7 @@ function updateSessionMetricVerification({ sessionId, turnId, taskId, verificati
     .map((record, index) => ({ record, index }))
     .filter(({ record }) => !record.malformed);
   if (!validIndexes.length) return { ok: false, reason: "empty_metrics" };
-  const match = turnId
-    ? validIndexes.find(({ record }) => record.turnId === turnId)
-    : [...validIndexes].reverse().find(({ record }) => record.verification === "unknown")
-      || validIndexes.at(-1);
+  const match = validIndexes.find(({ record }) => record.turnId === turnId);
   if (!match) return { ok: false, reason: "turn_not_found" };
   records[match.index] = {
     ...match.record,

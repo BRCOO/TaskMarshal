@@ -131,7 +131,7 @@ Use persistent sessions:
 
 ```text
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
-worker_send_task(provider: "reasonix", id: "audit", prompt: "<bounded task spec>")
+worker_send_task(provider: "reasonix", id: "audit", taskId: "task", prompt: "<bounded task spec>")
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", since: 120, maxChars: 4000)
 worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)

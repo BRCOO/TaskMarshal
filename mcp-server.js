@@ -204,12 +204,18 @@ function registerWorkerTools() {
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to use."),
       id: z.string().min(1).describe("Worker session id."),
-      prompt: z.string().min(1).describe("Task prompt for the worker.")
+      prompt: z.string().min(1).describe("Task prompt for the worker."),
+      taskId: z.string().optional().describe("Optional TaskMarshal task id to attach to this worker turn's metrics.")
     },
     annotations: actionAnnotations({ openWorld: true })
-  }, async ({ provider, id, prompt }) => routeProvider(provider, {
-    reasonix: () => runCtl(["send", id, prompt]),
-    "claude-code": () => claudeSendTask({ id, prompt })
+  }, async ({ provider, id, prompt, taskId }) => routeProvider(provider, {
+    reasonix: () => {
+      const args = ["send", id];
+      if (taskId) args.push("--task-id", taskId);
+      args.push(prompt);
+      return runCtl(args);
+    },
+    "claude-code": () => claudeSendTask({ id, prompt, taskId })
   }));
 
   server.registerTool("worker_observe", {
@@ -282,8 +288,8 @@ function registerWorkerTools() {
       status: VerificationStatus.optional().describe("Verification status for verify."),
       command: z.string().default("").describe("Verification command for verify."),
       exitCode: z.number().int().optional().describe("Command exit code for verify."),
-      session: z.string().default("").describe("Optional worker session id whose latest metric should receive this verification."),
-      turnId: z.string().default("").describe("Optional worker turn id to mark as verified."),
+      session: z.string().default("").describe("Optional worker session id for direct metric patching; requires turnId."),
+      turnId: z.string().default("").describe("Worker turn id to mark as verified when session is provided."),
       note: z.string().default("").describe("Short note."),
       batch: z.array(z.object({
         action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]),
@@ -351,8 +357,8 @@ function registerWorkerTools() {
       status: VerificationStatus.describe("Verification status."),
       command: z.string().default("").describe("Verification command or check."),
       exitCode: z.number().int().optional().describe("Command exit code."),
-      session: z.string().default("").describe("Optional worker session id whose latest metric should receive this verification."),
-      turnId: z.string().default("").describe("Optional worker turn id to mark as verified."),
+      session: z.string().default("").describe("Optional worker session id for direct metric patching; requires turnId."),
+      turnId: z.string().default("").describe("Worker turn id to mark as verified when session is provided."),
       note: z.string().default("").describe("Short verification note.")
     },
     annotations: readOnlyAnnotations()
@@ -543,10 +549,16 @@ function registerReasonixCompatTools() {
     description: "Legacy compatibility alias for worker_send_task with provider='reasonix'. Prefer worker_send_task.",
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id."),
-      prompt: z.string().min(1).describe("Task prompt for Reasonix.")
+      prompt: z.string().min(1).describe("Task prompt for Reasonix."),
+      taskId: z.string().optional().describe("Optional TaskMarshal task id to attach to this worker turn's metrics.")
     },
     annotations: actionAnnotations({ openWorld: true })
-  }, async ({ id, prompt }) => toolResult(await runCtl(["send", id, prompt])));
+  }, async ({ id, prompt, taskId }) => {
+    const args = ["send", id];
+    if (taskId) args.push("--task-id", taskId);
+    args.push(prompt);
+    return toolResult(await runCtl(args));
+  });
 
   server.registerTool("reasonix_observe", {
     title: "Reasonix Observe",
@@ -808,12 +820,12 @@ function claudeStatus(id) {
   return success(publicClaudeMeta(readClaudeMeta(id)));
 }
 
-async function claudeSendTask({ id, prompt }) {
+async function claudeSendTask({ id, prompt, taskId }) {
   const meta = readClaudeMeta(id);
   if (meta.status === "stopped") return failure(`Claude Code session is stopped: ${id}`);
   const turnId = randomUUID();
   const startedAt = new Date().toISOString();
-  appendJsonl(meta.events, { ts: startedAt, method: "control/send", provider: "claude-code", id, turnId, prompt });
+  appendJsonl(meta.events, { ts: startedAt, method: "control/send", provider: "claude-code", id, turnId, prompt, taskId: cleanTaskId(taskId) });
   meta.status = "running";
   meta.updatedAt = startedAt;
   writeJson(claudeMetaPath(id), meta);
@@ -832,7 +844,7 @@ async function claudeSendTask({ id, prompt }) {
   if (!result.ok) {
     meta.status = "ready";
     meta.updatedAt = finishedAt;
-    meta.lastTurn = { turnId, startedAt, finishedAt, ok: false, error: result.error };
+    meta.lastTurn = { turnId, taskId: cleanTaskId(taskId), startedAt, finishedAt, ok: false, error: result.error };
     meta.turnCount = (meta.turnCount ?? 0) + 1;
     writeJson(claudeMetaPath(id), meta);
     appendJsonl(meta.events, { ts: finishedAt, method: "control/turn_error", provider: "claude-code", id, turnId, error: result.error });
@@ -842,6 +854,7 @@ async function claudeSendTask({ id, prompt }) {
   if (result.data.sessionId) meta.claudeSessionId = result.data.sessionId;
   const turn = {
     turnId,
+    taskId: cleanTaskId(taskId),
     startedAt,
     finishedAt,
     ok: true,
@@ -1029,6 +1042,7 @@ function claudeMetricRecords(meta) {
       session: meta.id,
       model: meta.model ?? null,
       approveMode: meta.approve ?? null,
+      taskId: send?.taskId ?? turn.taskId ?? null,
       ok: true,
       stopReason: turn.stopReason ?? null,
       elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null,
@@ -1053,6 +1067,7 @@ function claudeMetricRecords(meta) {
       session: meta.id,
       model: meta.model ?? null,
       approveMode: meta.approve ?? null,
+      taskId: send?.taskId ?? null,
       ok: false,
       stopReason: "error",
       elapsedMs: null,
@@ -1318,6 +1333,11 @@ function readJsonLenient(path) {
 function appendJsonl(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${JSON.stringify(value)}\n`, "utf8");
+}
+
+function cleanTaskId(value) {
+  const id = String(value ?? "").trim();
+  return /^[A-Za-z0-9_.-]+$/.test(id) ? id : null;
 }
 
 function readTailJsonl(path, count) {

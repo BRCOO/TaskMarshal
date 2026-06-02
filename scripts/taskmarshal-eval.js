@@ -84,6 +84,26 @@ if (linkedTask.ok && linkedTask.data.taskId) {
   results.push({ name: "verification links session metric", passed: false, data: linkedTask.data, error: linkedTask.error });
 }
 
+const mergeSessionId = "tm-eval-taskid-merge";
+const mergeTurnId = "synthetic-merge-turn";
+const mergeTask = run(["task-create", "--goal", "eval taskid merge", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
+if (mergeTask.ok && mergeTask.data.taskId) {
+  createSyntheticMetricsSession(mergeSessionId, mergeTurnId, mergeTask.data.taskId);
+  run(["checkpoint", "--id", mergeTask.data.taskId, "--step", "s1", "--note", "eval"]);
+  run(["verify", "--id", mergeTask.data.taskId, "--status", "fail", "--command", "eval-fail"]);
+  const mergeVerify = run(["verify", "--id", mergeTask.data.taskId, "--status", "pass", "--command", "eval"]);
+  const mergedMetrics = run(["metrics", "--limit", "20", "--compact"]);
+  const mergedRecord = mergedMetrics.data?.recent?.find((record) => record.verification === "pass" && record.assistantChars === 20);
+  results.push({
+    name: "metrics merge verification by task id",
+    passed: mergeVerify.ok && mergedMetrics.ok && Boolean(mergedRecord),
+    data: { verify: mergeVerify.data, mergedRecord, taskVerification: mergedMetrics.data?.taskVerification },
+    error: mergeVerify.error || mergedMetrics.error
+  });
+} else {
+  results.push({ name: "metrics merge verification by task id", passed: false, data: mergeTask.data, error: mergeTask.error });
+}
+
 const compactMetrics = run(["metrics", "--limit", "8", "--compact"]);
 results.push({
   name: "compact metrics",
@@ -162,7 +182,7 @@ function createSyntheticSession(id) {
   }, null, 2)}\n`, "utf8");
 }
 
-function createSyntheticMetricsSession(id, turnId) {
+function createSyntheticMetricsSession(id, turnId, taskId = null) {
   createSyntheticSession(id);
   const now = new Date().toISOString();
   const sessionDir = resolve(homedir(), ".reasonixctl", "sessions", id);
@@ -172,6 +192,7 @@ function createSyntheticMetricsSession(id, turnId) {
     session: id,
     model: "deepseek-v4-flash",
     turnId,
+    taskId,
     ok: true,
     stopReason: "end_turn",
     elapsedMs: 100,

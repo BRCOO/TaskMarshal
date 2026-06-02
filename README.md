@@ -379,10 +379,17 @@ small tasks local, tightens worker output budgets when recent worker output is
 large, and can upgrade a `flash` route to `pro` when recent verification or
 failure history shows that the cheaper path is not reliable enough.
 
-When recording task verification, pass `--session SESSION_ID` and optionally
-`--turn-id TURN_ID` to mark the corresponding worker metric as pass/fail/skip:
+When dispatching a token-firewall task to a worker, pass the task id to
+`worker_send_task` or `taskmarshalctl send --task-id TASK_ID`. The worker turn
+metric keeps that task id, and `worker_metrics_report` automatically merges the
+later task-gate verification by task id.
+
+If a worker turn was sent without a task id, pass both `--session SESSION_ID`
+and `--turn-id TURN_ID` when recording verification to patch the matching metric
+directly:
 
 ```bash
+taskmarshalctl send audit --task-id TASK_ID "implement the bounded task"
 taskmarshalctl verify --id TASK_ID --status pass --command "npm test" --session audit --turn-id TURN_ID
 ```
 
