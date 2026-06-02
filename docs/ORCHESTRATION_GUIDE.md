@@ -127,7 +127,8 @@ output size, permission counts, verification coverage, and routing guidance.
 Task-gate verification records are included in the same report so Codex can
 see recent pass/fail/skip outcomes without loading task ledgers.
 Use `compact: true` for normal routing checks; it returns aggregates, routing
-hints, and at most three recent records.
+hints, and at most three recent records. Compact mode reads recent metric tails
+per session and omits long task-verification detail lists.
 
 ## Pro Second Pass
 

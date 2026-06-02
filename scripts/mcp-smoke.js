@@ -167,7 +167,9 @@ const hasUsableBatchGate = batchCreate.structuredContent?.data?.action === "batc
   && batchFinalizeData?.results?.at(-1)?.data?.done === true;
 const hasUsableCompactMetrics = compactMetricsData?.compact === true
   && Array.isArray(compactMetricsData?.routingHints)
-  && compactMetricsData?.recent?.length <= 3;
+  && compactMetricsData?.recent?.length <= 3
+  && compactMetricsData?.metricsScan?.perSessionMetricLimit <= 50
+  && compactMetricsData?.taskVerification?.recent === undefined;
 const proReviewData = proReviewPlan?.structuredContent?.data;
 const compactTextOk = !compactText || routeDecision.content?.[0]?.text?.startsWith("ok ");
 const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"

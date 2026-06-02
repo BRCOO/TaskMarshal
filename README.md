@@ -62,6 +62,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Batch task gate calls for fewer MCP round trips
 - Minimal MCP tool profile and compact tool text mode for lower Codex context use
 - Incremental observation cursors and compact metrics reports
+- Tail-limited metrics scans for lower filesystem and context overhead
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -370,6 +371,8 @@ Use `worker_metrics_report(compact: true)` or
 recent turns without loading raw `events.jsonl` or transcripts into Codex
 context. Verification records from task gates are included in the metrics
 report, so routing quality can be judged from local pass/fail/skip evidence.
+Compact metrics reads only recent metric tails per session and omits long task
+verification detail lists.
 
 Templates:
 

@@ -15,6 +15,7 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add a minimal MCP tool profile and compact tool-result text mode.
 - [x] Add a merged task gate for route/create/checkpoint/verify/finalize.
 - [x] Add incremental observe cursors, compact metrics, and batch gate calls.
+- [x] Add tail-limited compact metrics scans.
 - [x] Add a local eval suite for routing and task-gate behavior.
 - [x] Update README/docs to explain the lean Codex + structured worker protocol.
 - [x] Sync the installed local TaskMarshal skill after repo changes.
@@ -67,6 +68,9 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add compact metrics mode.
   - Acceptance: `worker_metrics_report(compact: true)` returns aggregates,
     routing hints, and at most three recent records.
+- [x] Tail-limit compact metrics scans.
+  - Acceptance: compact metrics reads recent session metric tails and omits
+    long task-verification detail lists.
 - [x] Add batch gate calls.
   - Acceptance: Codex can run ordered gate operations through one
     `worker_task_gate(batch: [...])` call.

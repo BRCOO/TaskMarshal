@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
 import { readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
@@ -920,10 +930,11 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
   const sinceMs = since ? Date.parse(since) : null;
   const records = [];
   const sessionDirs = await listSessionDirs(maxSessions);
+  const perSessionMetricLimit = compact ? Math.max(5, Math.min(50, limit * 2)) : 2000;
   for (const dir of sessionDirs) {
     const meta = readJsonOptional(resolve(dir, "session.json"));
     const summary = readJsonOptional(resolve(dir, "session-summary.json"));
-    for (const metric of readJsonl(resolve(dir, "metrics.jsonl"))) {
+    for (const metric of readJsonlTail(resolve(dir, "metrics.jsonl"), perSessionMetricLimit)) {
       if (metric.malformed) continue;
       const tsMs = metric.ts ? Date.parse(metric.ts) : NaN;
       if (Number.isFinite(sinceMs) && Number.isFinite(tsMs) && tsMs < sinceMs) continue;
@@ -936,7 +947,10 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
   records.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
   const recent = records.slice(0, limit);
   const totals = summarizeMetrics(records);
-  const taskVerification = summarizeTaskVerification(readJsonl(resolve(WORKFLOW_DIR, "task-metrics.jsonl")));
+  const taskVerification = summarizeTaskVerification(
+    readJsonlTail(resolve(WORKFLOW_DIR, "task-metrics.jsonl"), compact ? 500 : 2000),
+    { compact }
+  );
   const report = {
     ok: true,
     generatedAt: new Date().toISOString(),
@@ -951,6 +965,10 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
   if (compact) {
     report.compact = true;
     report.recentCount = recent.length;
+    report.metricsScan = {
+      sessionCount: sessionDirs.length,
+      perSessionMetricLimit
+    };
     report.routingHints = buildRoutingHints({ totals, taskVerification });
     report.recent = recent.slice(0, Math.min(limit, 3)).map(compactMetricRecord);
     return report;
@@ -1020,7 +1038,8 @@ function summarizeMetrics(records) {
     autoPermissions: sumBy(records, "autoPermissions"),
     filesChangedCount: sumBy(records, "filesChangedCount"),
     unknownVerificationCount: records.filter((record) => record.verification === "unknown").length,
-    redoCount: sumBy(records, "redoCount")
+    redoCount: sumBy(records, "redoCount"),
+    totalCostUsd: sumBy(records, "totalCostUsd")
   };
 }
 
@@ -1080,23 +1099,28 @@ function compactMetricRecord(record) {
   };
 }
 
-function summarizeTaskVerification(records) {
+function summarizeTaskVerification(records, { compact = false } = {}) {
   const valid = records.filter((record) => !record.malformed);
   const byStatus = {};
   for (const record of valid) {
     const status = record.verification || "unknown";
     byStatus[status] = (byStatus[status] || 0) + 1;
   }
-  return {
+  const summary = {
     count: valid.length,
-    byStatus,
-    recent: valid.slice(-5).reverse().map((record) => ({
+    byStatus
+  };
+  if (compact) {
+    summary.recentCount = Math.min(valid.length, 5);
+    return summary;
+  }
+  summary.recent = valid.slice(-5).reverse().map((record) => ({
       taskId: record.taskId,
       route: record.route,
       verification: record.verification,
       exitCode: record.exitCode ?? null
-    }))
-  };
+  }));
+  return summary;
 }
 
 function numericOrZero(value) {
@@ -1500,6 +1524,39 @@ function readJsonl(path) {
         return { malformed: line };
       }
     });
+}
+
+function readJsonlTail(path, count) {
+  if (!path) return [];
+  if (!Number.isFinite(count) || count <= 0) return [];
+  if (!existsSync(path)) return [];
+  const stat = statSync(path);
+  if (stat.size === 0) return [];
+  const chunkSize = 64 * 1024;
+  let offset = stat.size;
+  let text = "";
+  let newlineCount = 0;
+  const fd = openSync(path, "r");
+  try {
+    while (offset > 0 && newlineCount <= count) {
+      const length = Math.min(chunkSize, offset);
+      offset -= length;
+      const buffer = Buffer.allocUnsafe(length);
+      const bytesRead = readSync(fd, buffer, 0, length, offset);
+      text = buffer.toString("utf8", 0, bytesRead) + text;
+      newlineCount = (text.match(/\n/g) || []).length;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  return lines.slice(-count).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return { malformed: line };
+    }
+  });
 }
 
 function displayEvents(events) {

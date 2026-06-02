@@ -49,7 +49,9 @@ results.push({
     && compactMetrics.data?.compact === true
     && Array.isArray(compactMetrics.data?.routingHints)
     && Array.isArray(compactMetrics.data?.recent)
-    && compactMetrics.data.recent.length <= 3,
+    && compactMetrics.data.recent.length <= 3
+    && compactMetrics.data?.metricsScan?.perSessionMetricLimit <= 50
+    && compactMetrics.data?.taskVerification?.recent === undefined,
   data: compactMetrics.data,
   error: compactMetrics.error
 });
