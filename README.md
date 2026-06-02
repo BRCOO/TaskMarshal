@@ -264,11 +264,14 @@ assistant output size, output-contract coverage, and compact metrics payload
 size. It is a regression gate for telemetry quality; live worker A/B quality
 still needs real task verification records.
 
-The Codex A/B benchmark compares Codex-only runs against Codex+TaskMarshal
-runs. It reports Codex input/output token savings separately from worker token
-usage, then checks quality with pass-rate, severe-issue, and redo-count
-non-inferiority budgets. The default run uses synthetic records so CI can
-verify the math. Real run records can be passed as JSONL:
+The Codex A/B benchmark compares Codex-only, Codex+TaskMarshal, and
+Codex+TaskMarshal+codegraph-style context runs. It reports Codex input/output
+token savings separately from worker token usage, then checks quality with
+pass-rate, severe-issue, and redo-count non-inferiority budgets. The third
+variant is named `taskmarshal+codegraph` and is used to measure whether compact
+repo context packets add savings beyond the TaskMarshal baseline. The default
+run uses synthetic records so CI can verify the math. Real run records can be
+passed as JSONL:
 
 ```bash
 npm run eval:codex-ab -- --input runs/codex-ab.jsonl
@@ -280,7 +283,7 @@ Each record should include:
 {
   "taskId": "large-debug-001",
   "size": "large",
-  "variant": "taskmarshal",
+  "variant": "taskmarshal+codegraph",
   "codexInputTokens": 12000,
   "codexOutputTokens": 2800,
   "workerInputTokens": 9500,

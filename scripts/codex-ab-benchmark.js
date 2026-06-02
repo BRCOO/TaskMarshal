@@ -3,11 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const APPROX_CHARS_PER_TOKEN = 4;
-const VARIANTS = ["codex-only", "taskmarshal"];
+const VARIANTS = ["codex-only", "taskmarshal", "taskmarshal+codegraph"];
 const BUDGETS = {
   codexTokenSavingMin: 0.25,
   mediumPlusCodexTokenSavingMin: 0.35,
+  codegraphExtraCodexSavingMin: 0.12,
+  mediumPlusCodegraphExtraSavingMin: 0.15,
   passRateDropMax: 0.05,
+  codegraphPassRateDropMax: 0.02,
   severeIssueIncreaseMax: 0,
   redoIncreaseMax: 0
 };
@@ -30,7 +33,7 @@ console.log(JSON.stringify({
     "Codex token metrics exclude worker token metrics; totalAiTokens includes both."
   ].join(" "),
   budgets,
-  summary: comparisons.summary,
+  summary: comparisons.codegraphSummary,
   bySize: comparisons.bySize,
   schema: recordSchema()
 }, null, 2));
@@ -93,6 +96,9 @@ function normalizeVariant(value) {
   const variant = String(value || "").toLowerCase();
   if (["codex-only", "codex_only", "baseline"].includes(variant)) return "codex-only";
   if (["taskmarshal", "codex-taskmarshal", "tm"].includes(variant)) return "taskmarshal";
+  if (["taskmarshal+codegraph", "taskmarshal-codegraph", "tm+codegraph", "tm-codegraph", "codegraph"].includes(variant)) {
+    return "taskmarshal+codegraph";
+  }
   throw new Error(`Invalid variant: ${value}`);
 }
 
@@ -116,16 +122,20 @@ function groupByVariant(records) {
 function compareVariants(groups) {
   const codexOnly = summarizeRecords(groups["codex-only"]);
   const taskmarshal = summarizeRecords(groups.taskmarshal);
+  const taskmarshalCodegraph = summarizeRecords(groups["taskmarshal+codegraph"]);
   const bySize = {};
   for (const size of ["small", "medium", "large"]) {
     bySize[size] = compareSummaries({
       codexOnly: summarizeRecords(groups["codex-only"].filter((record) => record.size === size)),
-      taskmarshal: summarizeRecords(groups.taskmarshal.filter((record) => record.size === size))
+      taskmarshal: summarizeRecords(groups.taskmarshal.filter((record) => record.size === size)),
+      taskmarshalCodegraph: summarizeRecords(groups["taskmarshal+codegraph"].filter((record) => record.size === size))
     });
   }
   return {
     ready: codexOnly.taskCount > 0 && taskmarshal.taskCount > 0,
+    codegraphReady: taskmarshalCodegraph.taskCount > 0,
     summary: compareSummaries({ codexOnly, taskmarshal }),
+    codegraphSummary: compareSummaries({ codexOnly, taskmarshal, taskmarshalCodegraph }),
     bySize
   };
 }
@@ -153,16 +163,27 @@ function summarizeRecords(records) {
   };
 }
 
-function compareSummaries({ codexOnly, taskmarshal }) {
+function compareSummaries({ codexOnly, taskmarshal, taskmarshalCodegraph = null }) {
+  const codegraph = taskmarshalCodegraph;
   return {
     codexOnly,
     taskmarshal,
+    ...(codegraph ? { taskmarshalCodegraph: codegraph } : {}),
     codexTokenSaving: ratioSaving(codexOnly.codexTokens, taskmarshal.codexTokens),
     totalAiTokenSaving: ratioSaving(codexOnly.totalAiTokens, taskmarshal.totalAiTokens),
     passRateDelta: nullableDelta(taskmarshal.passRate, codexOnly.passRate),
     qualityScoreDelta: nullableDelta(taskmarshal.avgQualityScore, codexOnly.avgQualityScore),
     severeIssueDelta: taskmarshal.severeIssues - codexOnly.severeIssues,
-    redoDelta: taskmarshal.redoCount - codexOnly.redoCount
+    redoDelta: taskmarshal.redoCount - codexOnly.redoCount,
+    ...(codegraph ? {
+      codegraphCodexTokenSaving: ratioSaving(codexOnly.codexTokens, codegraph.codexTokens),
+      codegraphTotalAiTokenSaving: ratioSaving(codexOnly.totalAiTokens, codegraph.totalAiTokens),
+      codegraphVsTaskmarshalCodexSaving: ratioSaving(taskmarshal.codexTokens, codegraph.codexTokens),
+      codegraphPassRateDelta: nullableDelta(codegraph.passRate, taskmarshal.passRate),
+      codegraphQualityScoreDelta: nullableDelta(codegraph.avgQualityScore, taskmarshal.avgQualityScore),
+      codegraphSevereIssueDelta: codegraph.severeIssues - taskmarshal.severeIssues,
+      codegraphRedoDelta: codegraph.redoCount - taskmarshal.redoCount
+    } : {})
   };
 }
 
@@ -175,18 +196,35 @@ function buildBudgetReport(comparisons) {
     comparisons.bySize.medium.taskmarshal,
     comparisons.bySize.large.taskmarshal
   ]);
+  const mediumPlusCodegraph = combineSummaries([
+    comparisons.bySize.medium.taskmarshalCodegraph,
+    comparisons.bySize.large.taskmarshalCodegraph
+  ]);
   const mediumPlusSaving = ratioSaving(mediumPlusCodexOnly.codexTokens, mediumPlusTaskmarshal.codexTokens);
+  const mediumPlusCodegraphExtraSaving = comparisons.codegraphReady
+    ? ratioSaving(mediumPlusTaskmarshal.codexTokens, mediumPlusCodegraph.codexTokens)
+    : null;
   return {
     hasBothVariants: {
       actual: comparisons.ready,
       expected: true,
       ok: comparisons.ready
     },
+    hasCodegraphVariant: {
+      actual: comparisons.codegraphReady,
+      expected: true,
+      ok: comparisons.codegraphReady
+    },
     codexTokenSaving: minBudget(comparisons.summary.codexTokenSaving, BUDGETS.codexTokenSavingMin),
     mediumPlusCodexTokenSaving: minBudget(mediumPlusSaving, BUDGETS.mediumPlusCodexTokenSavingMin),
+    codegraphExtraCodexSaving: minBudget(comparisons.codegraphSummary.codegraphVsTaskmarshalCodexSaving ?? null, BUDGETS.codegraphExtraCodexSavingMin),
+    mediumPlusCodegraphExtraSaving: minBudget(mediumPlusCodegraphExtraSaving, BUDGETS.mediumPlusCodegraphExtraSavingMin),
     passRateDrop: maxBudget(-Math.min(comparisons.summary.passRateDelta ?? 0, 0), BUDGETS.passRateDropMax),
+    codegraphPassRateDrop: maxBudget(-Math.min(comparisons.codegraphSummary.codegraphPassRateDelta ?? 0, 0), BUDGETS.codegraphPassRateDropMax),
     severeIssueIncrease: maxBudget(comparisons.summary.severeIssueDelta, BUDGETS.severeIssueIncreaseMax),
-    redoIncrease: maxBudget(comparisons.summary.redoDelta, BUDGETS.redoIncreaseMax)
+    redoIncrease: maxBudget(comparisons.summary.redoDelta, BUDGETS.redoIncreaseMax),
+    codegraphSevereIssueIncrease: maxBudget(comparisons.codegraphSummary.codegraphSevereIssueDelta ?? 0, BUDGETS.severeIssueIncreaseMax),
+    codegraphRedoIncrease: maxBudget(comparisons.codegraphSummary.codegraphRedoDelta ?? 0, BUDGETS.redoIncreaseMax)
   };
 }
 
@@ -207,21 +245,23 @@ function combineSummaries(summaries) {
 
 function syntheticRecords() {
   const tasks = [
-    { id: "small-docs", size: "small", codexOnly: 1400, taskmarshal: 2100, worker: 0 },
-    { id: "small-one-file", size: "small", codexOnly: 2200, taskmarshal: 2600, worker: 500 },
-    { id: "medium-refactor", size: "medium", codexOnly: 11500, taskmarshal: 6900, worker: 5200 },
-    { id: "medium-test-fix", size: "medium", codexOnly: 13200, taskmarshal: 7400, worker: 6100 },
-    { id: "large-debug", size: "large", codexOnly: 36000, taskmarshal: 14800, worker: 21500 },
-    { id: "large-architecture", size: "large", codexOnly: 42000, taskmarshal: 16300, worker: 24800 }
+    { id: "small-docs", size: "small", codexOnly: 1400, taskmarshal: 2100, worker: 0, codegraph: 2050, codegraphWorker: 200 },
+    { id: "small-one-file", size: "small", codexOnly: 2200, taskmarshal: 2600, worker: 500, codegraph: 2500, codegraphWorker: 700 },
+    { id: "medium-refactor", size: "medium", codexOnly: 11500, taskmarshal: 6900, worker: 5200, codegraph: 5600, codegraphWorker: 5600 },
+    { id: "medium-test-fix", size: "medium", codexOnly: 13200, taskmarshal: 7400, worker: 6100, codegraph: 5900, codegraphWorker: 6500 },
+    { id: "large-debug", size: "large", codexOnly: 36000, taskmarshal: 14800, worker: 21500, codegraph: 11200, codegraphWorker: 22500 },
+    { id: "large-architecture", size: "large", codexOnly: 42000, taskmarshal: 16300, worker: 24800, codegraph: 12100, codegraphWorker: 26000 }
   ];
   return tasks.flatMap((task) => [
     makeSyntheticRun(task, "codex-only", task.codexOnly, 0),
-    makeSyntheticRun(task, "taskmarshal", task.taskmarshal, task.worker)
+    makeSyntheticRun(task, "taskmarshal", task.taskmarshal, task.worker),
+    makeSyntheticRun(task, "taskmarshal+codegraph", task.codegraph, task.codegraphWorker)
   ]);
 }
 
 function makeSyntheticRun(task, variant, codexTotalTokens, workerTotalTokens) {
-  const outputTokens = Math.round(codexTotalTokens * (variant === "codex-only" ? 0.16 : 0.11));
+  const outputRatio = variant === "codex-only" ? 0.16 : variant === "taskmarshal+codegraph" ? 0.1 : 0.11;
+  const outputTokens = Math.round(codexTotalTokens * outputRatio);
   return {
     taskId: task.id,
     size: task.size,
@@ -231,7 +271,7 @@ function makeSyntheticRun(task, variant, codexTotalTokens, workerTotalTokens) {
     workerInputTokens: Math.round(workerTotalTokens * 0.45),
     workerOutputTokens: Math.round(workerTotalTokens * 0.55),
     passed: true,
-    qualityScore: task.size === "small" && variant === "taskmarshal" ? 0.92 : 0.95,
+    qualityScore: task.size === "small" && variant !== "codex-only" ? 0.92 : 0.95,
     severeIssues: 0,
     redoCount: 0,
     elapsedSec: variant === "codex-only" ? codexTotalTokens / 80 : (codexTotalTokens + workerTotalTokens) / 100
@@ -241,7 +281,7 @@ function makeSyntheticRun(task, variant, codexTotalTokens, workerTotalTokens) {
 function recordSchema() {
   return {
     required: ["taskId", "size", "variant", "passed"],
-    variant: ["codex-only", "taskmarshal"],
+    variant: ["codex-only", "taskmarshal", "taskmarshal+codegraph"],
     size: ["small", "medium", "large"],
     tokenFields: [
       "codexInputTokens/codexOutputTokens or codexInputChars/codexOutputChars",
