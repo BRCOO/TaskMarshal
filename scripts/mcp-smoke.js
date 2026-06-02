@@ -98,10 +98,11 @@ const hasUsableMetricsReport = Boolean(metricsData?.totals)
   && Array.isArray(metricsData?.guidance);
 const routeData = routeDecision.structuredContent?.data;
 const contextData = contextQuery.structuredContent?.data;
+const contextBackends = ["codegraph", "local-static"];
 const hasUsableRouteDecision = ["local", "flash", "pro"].includes(routeData?.route)
   && Array.isArray(routeData?.reasonCodes)
   && routeData?.metricsEvidence?.source === "compact_metrics";
-const hasUsableContextQuery = contextData?.backend === "local-static"
+const hasUsableContextQuery = contextBackends.includes(contextData?.backend)
   && Array.isArray(contextData?.relevantFiles)
   && contextData.relevantFiles.length > 0
   && JSON.stringify(contextData).length <= 1400;
@@ -240,6 +241,7 @@ console.log(JSON.stringify({
   hasWorkerSummarizeSession,
   hasWorkerMetricsReport,
   hasWorkerContextQuery,
+  contextBackend: contextData?.backend ?? null,
   hasUsableMetricsReport,
   hasUsableContextQuery,
   hasUsableCompactMetrics,

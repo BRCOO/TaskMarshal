@@ -64,7 +64,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Incremental observation cursors and compact metrics reports
 - Tail-limited metrics scans for lower filesystem and context overhead
 - Default worker output contract with 1200-character final-output cap
-- Compact repo context query for codegraph-style task scoping
+- Compact repo context query with optional CodeGraph backend
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -207,18 +207,34 @@ The TaskMarshal Skill chooses between:
 
 ## Compact Repo Context
 
-TaskMarshal includes a read-only context adapter for codegraph-style repository
-understanding without exposing raw graph/search logs to Codex. The first backend
-is `local-static`: it scans bounded local text files, ranks relevant paths and
-symbols, and returns a compact packet with impact/risk hints.
+TaskMarshal includes a read-only context adapter for repository understanding
+without exposing raw graph/search logs to Codex. `worker_context_query` is the
+only MCP surface Codex needs. It returns a compact packet with relevant files,
+symbols, impact hints, risks, confidence, and hard size limits.
+
+The default backend is `auto`:
+
+- If `@colbymchenry/codegraph` is installed and the target repo has a local
+  `.codegraph/` index, TaskMarshal uses CodeGraph's CLI JSON context output.
+- Otherwise it falls back to `local-static`, which scans bounded local text
+  files and ranks relevant paths and symbols.
+
+This keeps CodeGraph hidden behind TaskMarshal instead of registering external
+CodeGraph MCP tools directly, so Codex gets one small context packet rather
+than a larger tool list.
 
 ```bash
+npm install --save-optional @colbymchenry/codegraph
+npx codegraph init .
+npx codegraph sync .
 node taskmarshalctl.js context query --goal "fix worker observe summary" --scope "mcp-server.js,taskmarshalctl.js"
+node taskmarshalctl.js context query --goal "fix worker observe summary" --backend local-static
 ```
 
-MCP exposes the same capability as `worker_context_query`. Keep this as a
-single compact tool instead of registering external CodeGraph/Graphify tools
-directly; future backends can plug in behind the same packet shape.
+CodeGraph writes its local index to `.codegraph/`, which is gitignored. The
+context query does not initialize or sync indexes automatically because the MCP
+tool is read-only. If the index has pending changes, the packet includes a risk
+hint telling the operator to run `codegraph sync`.
 
 ## Token-Efficient Worker Output
 

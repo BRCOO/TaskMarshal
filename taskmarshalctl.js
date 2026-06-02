@@ -347,17 +347,18 @@ async function metricsReport(args) {
   output(await buildMetricsReport(parseMetricsArgs(args)));
 }
 
-function contextCommand(args) {
+async function contextCommand(args) {
   const [subcmd = "query", ...rest] = args;
-  if (subcmd !== "query") throw new Error("context usage: taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N]");
+  if (subcmd !== "query") throw new Error("context usage: taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N] [--backend auto|codegraph|local-static]");
   const input = parseKeyValueArgs(rest);
   const goal = cleanText(input.goal);
   if (!goal) throw new Error("context query requires --goal TEXT");
-  output(buildContextPacket({
+  output(await buildContextPacket({
     root: input.dir ? resolve(input.dir) : process.cwd(),
     goal,
     scope: input.scope || "",
-    maxChars: input.maxChars
+    maxChars: input.maxChars,
+    backend: input.backend
   }));
 }
 
@@ -1007,7 +1008,7 @@ Usage:
   taskmarshalctl models
   taskmarshalctl install-codex-config [--write-user] [--config PATH] [--server PATH] [--name taskmarshal-mcp]
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--output-max-chars N] [--no-output-contract] [--yolo]
-  taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N] [--dir PATH]
+  taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N] [--dir PATH] [--backend auto|codegraph|local-static]
   taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE] [--compact]
   taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
   taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]

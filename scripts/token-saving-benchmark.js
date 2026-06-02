@@ -10,6 +10,7 @@ const SESSION_DIR = resolve(homedir(), ".reasonixctl", "sessions", SESSION_ID);
 const APPROX_CHARS_PER_TOKEN = 4;
 const BUDGETS = {
   minimalToolListChars: 10500,
+  compactContextStructuredChars: 1400,
   observeSummaryStructuredChars: 900,
   observeFinalStructuredChars: 800,
   compactMetricsStructuredChars: 3600
@@ -57,6 +58,24 @@ const observe = await withMcp({
     events: measureToolResult(events),
     summary: measureToolResult(summary),
     final: measureToolResult(final)
+  };
+});
+
+const context = await withMcp({
+  TASKMARSHAL_TOOL_PROFILE: "minimal",
+  TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
+}, async (client) => {
+  const query = await client.callTool({
+    name: "worker_context_query",
+    arguments: {
+      goal: "Route a compact context query without expanding MCP tools.",
+      scope: "lib/context-adapter.js,taskmarshalctl.js",
+      maxChars: 1200
+    }
+  });
+  return {
+    query: measureToolResult(query),
+    backend: query.structuredContent?.data?.backend ?? null
   };
 });
 
@@ -109,6 +128,7 @@ console.log(JSON.stringify({
         text: comparisons.toolListChars
       }
     },
+    context,
     observe,
     metrics
   },
@@ -176,6 +196,7 @@ function compareCount(before, after) {
 
 function withinBudgets() {
   return minimal.toolList.chars <= BUDGETS.minimalToolListChars
+    && context.query.structuredChars <= BUDGETS.compactContextStructuredChars
     && observe.summary.structuredChars <= BUDGETS.observeSummaryStructuredChars
     && observe.final.structuredChars <= BUDGETS.observeFinalStructuredChars
     && metrics.compact.structuredChars <= BUDGETS.compactMetricsStructuredChars;
@@ -184,6 +205,7 @@ function withinBudgets() {
 function budgetReport() {
   return {
     minimalToolListChars: budgetItem(minimal.toolList.chars, BUDGETS.minimalToolListChars),
+    compactContextStructuredChars: budgetItem(context.query.structuredChars, BUDGETS.compactContextStructuredChars),
     observeSummaryStructuredChars: budgetItem(observe.summary.structuredChars, BUDGETS.observeSummaryStructuredChars),
     observeFinalStructuredChars: budgetItem(observe.final.structuredChars, BUDGETS.observeFinalStructuredChars),
     compactMetricsStructuredChars: budgetItem(metrics.compact.structuredChars, BUDGETS.compactMetricsStructuredChars)
