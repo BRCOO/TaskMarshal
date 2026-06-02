@@ -123,6 +123,23 @@ function registerWorkerTools() {
     "claude-code": () => claudeDoctor()
   }));
 
+  if (enabled("worker_context_query")) server.registerTool("worker_context_query", {
+    title: "TaskMarshal Context Query",
+    description: "Return a compact repo context packet for a task goal.",
+    inputSchema: {
+      goal: z.string().min(1).describe("Task goal."),
+      scope: z.string().default("").describe("Files or modules."),
+      dir: z.string().optional().describe("Repository directory."),
+      maxChars: z.number().int().min(500).max(6000).default(1200).describe("Maximum packet size.")
+    },
+    annotations: readOnlyAnnotations()
+  }, async ({ goal, scope, dir, maxChars }) => {
+    const args = ["context", "query", "--goal", goal, "--max-chars", String(maxChars)];
+    if (scope) args.push("--scope", scope);
+    if (dir) args.push("--dir", dir);
+    return toolResult(await runCtl(args, { cwd: dir }));
+  });
+
   if (enabled("worker_ask")) server.registerTool("worker_ask", {
     title: "TaskMarshal One-Shot Ask",
     description: "Run a short single prompt with a worker provider. Avoid for long repo audits or slow investigations; use worker_start_session, worker_send_task, and worker_observe instead.",
@@ -205,7 +222,7 @@ function registerWorkerTools() {
 
   server.registerTool("worker_send_task", {
     title: "TaskMarshal Send Task",
-    description: "Send a task prompt to an existing persistent worker session. Observe separately with worker_observe.",
+    description: "Send a bounded task to a worker session.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to use."),
       id: z.string().min(1).describe("Worker session id."),
@@ -225,7 +242,7 @@ function registerWorkerTools() {
 
   server.registerTool("worker_observe", {
     title: "TaskMarshal Observe Worker",
-    description: "Read recent events or compact state from a persistent worker session. Use compact modes to save Codex context.",
+    description: "Read compact worker session state.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to inspect."),
       id: z.string().min(1).describe("Worker session id."),
@@ -256,7 +273,7 @@ function registerWorkerTools() {
 
   server.registerTool("worker_metrics_report", {
     title: "TaskMarshal Metrics Report",
-    description: "Return a compact cross-session metrics report for routing and token-efficiency decisions.",
+    description: "Return compact worker metrics.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to inspect."),
       limit: z.number().int().min(1).max(500).default(20).describe("Maximum recent metric records to include."),
@@ -279,7 +296,7 @@ function registerWorkerTools() {
 
   server.registerTool("worker_task_gate", {
     title: "TaskMarshal Task Gate",
-    description: "Merged token-firewall task gate: route, create, checkpoint, verify, or finalize.",
+    description: "Route, create, checkpoint, verify, or finalize a task.",
     inputSchema: {
       action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).default("route").describe("Gate action."),
       goal: z.string().default("").describe("Short task goal for route/create."),
@@ -1594,6 +1611,7 @@ function toolEnabled(name) {
   if (TOOL_PROFILE === "full" || TOOL_PROFILE === "standard") return true;
   const minimal = new Set([
     "worker_doctor",
+    "worker_context_query",
     "worker_start_session",
     "worker_send_task",
     "worker_observe",

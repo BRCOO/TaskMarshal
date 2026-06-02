@@ -49,6 +49,14 @@ const routeDecision = await client.callTool({
     files: 2
   }
 });
+const contextQuery = await client.callTool({
+  name: "worker_context_query",
+  arguments: {
+    goal: "Smoke-test compact context query.",
+    scope: "mcp-server.js,taskmarshalctl.js",
+    maxChars: 1200
+  }
+});
 const taskCreate = await client.callTool({
   name: "worker_task_gate",
   arguments: {
@@ -70,6 +78,7 @@ const proReviewPlan = profile === "minimal" ? null : await client.callTool({
 const hasWorkerSendTask = tools.tools.some((tool) => tool.name === "worker_send_task");
 const hasWorkerSummarizeSession = tools.tools.some((tool) => tool.name === "worker_summarize_session");
 const hasWorkerMetricsReport = tools.tools.some((tool) => tool.name === "worker_metrics_report");
+const hasWorkerContextQuery = tools.tools.some((tool) => tool.name === "worker_context_query");
 const hasWorkerTaskGate = tools.tools.some((tool) => tool.name === "worker_task_gate");
 const hasWorkerRouteDecision = tools.tools.some((tool) => tool.name === "worker_route_decision");
 const hasWorkerCreateTask = tools.tools.some((tool) => tool.name === "worker_create_task");
@@ -88,9 +97,14 @@ const hasUsableMetricsReport = Boolean(metricsData?.totals)
   && Array.isArray(metricsData?.recent)
   && Array.isArray(metricsData?.guidance);
 const routeData = routeDecision.structuredContent?.data;
+const contextData = contextQuery.structuredContent?.data;
 const hasUsableRouteDecision = ["local", "flash", "pro"].includes(routeData?.route)
   && Array.isArray(routeData?.reasonCodes)
   && routeData?.metricsEvidence?.source === "compact_metrics";
+const hasUsableContextQuery = contextData?.backend === "local-static"
+  && Array.isArray(contextData?.relevantFiles)
+  && contextData.relevantFiles.length > 0
+  && JSON.stringify(contextData).length <= 1400;
 const taskData = taskCreate.structuredContent?.data;
 const taskId = taskData?.taskId;
 const checkpointOne = taskId ? await client.callTool({
@@ -185,7 +199,9 @@ const expectsLegacyHidden = hideLegacy || profile === "minimal";
 const ok = hasWorkerSendTask
     && (profile === "minimal" || hasWorkerSummarizeSession)
     && hasWorkerMetricsReport
+    && hasWorkerContextQuery
     && hasUsableMetricsReport
+    && hasUsableContextQuery
     && hasUsableCompactMetrics
     && hasWorkerTaskGate
     && hasUsableRouteDecision
@@ -223,7 +239,9 @@ console.log(JSON.stringify({
   hasWorkerSendTask,
   hasWorkerSummarizeSession,
   hasWorkerMetricsReport,
+  hasWorkerContextQuery,
   hasUsableMetricsReport,
+  hasUsableContextQuery,
   hasUsableCompactMetrics,
   hasWorkerTaskGate,
   hasWorkerRouteDecision,

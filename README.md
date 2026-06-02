@@ -64,6 +64,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Incremental observation cursors and compact metrics reports
 - Tail-limited metrics scans for lower filesystem and context overhead
 - Default worker output contract with 1200-character final-output cap
+- Compact repo context query for codegraph-style task scoping
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -204,6 +205,21 @@ The TaskMarshal Skill chooses between:
 - **Light Mode:** one bounded worker prompt.
 - **Full Marshal Mode:** Codex plans, dispatches, observes, approves, reviews, and verifies.
 
+## Compact Repo Context
+
+TaskMarshal includes a read-only context adapter for codegraph-style repository
+understanding without exposing raw graph/search logs to Codex. The first backend
+is `local-static`: it scans bounded local text files, ranks relevant paths and
+symbols, and returns a compact packet with impact/risk hints.
+
+```bash
+node taskmarshalctl.js context query --goal "fix worker observe summary" --scope "mcp-server.js,taskmarshalctl.js"
+```
+
+MCP exposes the same capability as `worker_context_query`. Keep this as a
+single compact tool instead of registering external CodeGraph/Graphify tools
+directly; future backends can plug in behind the same packet shape.
+
 ## Token-Efficient Worker Output
 
 TaskMarshal keeps worker handoffs small by default. Reasonix and Claude Code
@@ -294,6 +310,7 @@ Provider-neutral tools:
 |---|---|
 | `worker_list_providers` | List available worker providers. |
 | `worker_doctor` | Check provider installation/configuration. |
+| `worker_context_query` | Return compact repository context for a task goal. |
 | `worker_ask` | Run one prompt with a worker. |
 | `worker_start_session` | Start a persistent worker session. |
 | `worker_list_sessions` | List known worker sessions. |

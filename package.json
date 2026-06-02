@@ -29,7 +29,7 @@
     "taskmarshal-mcp": "./mcp-server.js"
   },
   "scripts": {
-    "check": "node --check taskmarshalctl.js && node --check reasonixctl.js && node --check lib/acp-client.js && node --check lib/worker-output-contract.js && node --check mcp-server.js && node --check scripts/token-saving-benchmark.js && node --check scripts/quality-benchmark.js && node --check scripts/codex-ab-benchmark.js",
+    "check": "node --check taskmarshalctl.js && node --check reasonixctl.js && node --check lib/acp-client.js && node --check lib/context-adapter.js && node --check lib/worker-output-contract.js && node --check mcp-server.js && node --check scripts/token-saving-benchmark.js && node --check scripts/quality-benchmark.js && node --check scripts/codex-ab-benchmark.js",
     "doctor": "node taskmarshalctl.js doctor",
     "eval": "node scripts/taskmarshal-eval.js",
     "eval:codex-ab": "node scripts/codex-ab-benchmark.js",
