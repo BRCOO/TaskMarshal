@@ -872,12 +872,12 @@ function parseObserveArgs(args) {
   const id = args[0];
   if (!id) throw new Error("observe requires SESSION_ID");
   let tail = 40;
-  let mode = "events";
+  let mode = "summary";
   let maxChars = 12000;
   let since = 0;
   for (let i = 1; i < args.length; i += 1) {
     if (args[i] === "--tail") tail = Number(args[++i] || 40);
-    else if (args[i] === "--mode") mode = args[++i] || "events";
+    else if (args[i] === "--mode") mode = args[++i] || "summary";
     else if (args[i] === "--max-chars") maxChars = Number(args[++i] || 12000);
     else if (args[i] === "--since") since = Number(args[++i] || 0);
     else throw new Error(`Unknown observe option: ${args[i]}`);
@@ -1001,7 +1001,7 @@ Usage:
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
   taskmarshalctl send SESSION_ID [--task-id TASK_ID] [--output-max-chars N] [--no-output-contract] "prompt"
-  taskmarshalctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N] [--since CURSOR]
+  taskmarshalctl observe SESSION_ID [--tail N] [--mode summary|final|permission|events] [--max-chars N] [--since CURSOR]
   taskmarshalctl summarize SESSION_ID [--max-chars N]
   taskmarshalctl approve SESSION_ID
   taskmarshalctl deny SESSION_ID
@@ -1014,6 +1014,7 @@ Notes:
   ask uses Reasonix's native ACP JSON-RPC stdio agent.
   Events and transcripts are written under ~/.reasonixctl/runs by default.
   start creates a persistent local daemon backed by reasonix acp.
+  observe defaults to summary mode; pass --mode events only when raw event tails are needed.
   worker output contract is default-on: final worker text is capped at ${DEFAULT_WORKER_OUTPUT_MAX_CHARS} chars unless disabled.
   install-codex-config prints a minimal+compact Codex MCP config by default; --write-user updates ~/.codex/config.toml with a backup.
 `);

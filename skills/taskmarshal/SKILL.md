@@ -142,10 +142,10 @@ worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
 worker_metrics_report(provider: "reasonix", limit: 20, compact: true)
 ```
 
-Every observation returns a numeric cursor. Pass it as `since` on the next
-observe call to avoid re-reading old event tails. Use
-`worker_observe(mode: "events")` only when compact summary/final/permission
-views are not enough.
+Every observation returns a numeric cursor. `worker_observe` defaults to
+`summary`; pass the cursor as `since` on the next observe call to avoid
+re-reading old event tails. Use `worker_observe(mode: "events")` only when
+compact summary/final/permission views are not enough.
 
 Use `worker_metrics_report` when deciding whether routing is saving tokens or
 when repeated worker turns feel too verbose, slow, or weakly verified. Prefer
@@ -153,7 +153,8 @@ when repeated worker turns feel too verbose, slow, or weakly verified. Prefer
 
 When editing TaskMarshal token controls, run `npm run eval:tokens` to compare
 standard vs minimal MCP tool text, events vs summary/final observation, and
-normal vs compact metrics output.
+normal vs compact metrics output. The benchmark has hard budgets for compact
+paths and should fail on token regressions.
 
 For substantial delegated work, prefer the merged token-firewall gate. Codex
 should pass short fields, then rely on local task ledgers and taskKey gates:

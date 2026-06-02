@@ -8,6 +8,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const SESSION_ID = "tm-token-benchmark";
 const SESSION_DIR = resolve(homedir(), ".reasonixctl", "sessions", SESSION_ID);
 const APPROX_CHARS_PER_TOKEN = 4;
+const BUDGETS = {
+  minimalToolListChars: 10500,
+  observeSummaryStructuredChars: 900,
+  observeFinalStructuredChars: 800,
+  compactMetricsStructuredChars: 3600
+};
 process.on("exit", cleanupSyntheticReasonixSession);
 
 createSyntheticReasonixSession(SESSION_ID);
@@ -86,12 +92,14 @@ const ok = comparisons.toolListChars.savedChars > 0
   && comparisons.toolCount.saved > 0
   && comparisons.observeSummaryChars.savedChars > 0
   && comparisons.observeFinalChars.savedChars > 0
-  && comparisons.metricsCompactChars.savedChars > 0;
+  && comparisons.metricsCompactChars.savedChars > 0
+  && withinBudgets();
 
 console.log(JSON.stringify({
   ok,
   generatedAt: new Date().toISOString(),
   note: `approxTokens uses ${APPROX_CHARS_PER_TOKEN} chars/token; compare chars for exact regression tracking.`,
+  budgets: budgetReport(),
   benchmark: {
     tools: {
       standard,
@@ -163,6 +171,31 @@ function compareCount(before, after) {
     after,
     saved,
     savedPct: before > 0 ? round(saved / before, 4) : null
+  };
+}
+
+function withinBudgets() {
+  return minimal.toolList.chars <= BUDGETS.minimalToolListChars
+    && observe.summary.structuredChars <= BUDGETS.observeSummaryStructuredChars
+    && observe.final.structuredChars <= BUDGETS.observeFinalStructuredChars
+    && metrics.compact.structuredChars <= BUDGETS.compactMetricsStructuredChars;
+}
+
+function budgetReport() {
+  return {
+    minimalToolListChars: budgetItem(minimal.toolList.chars, BUDGETS.minimalToolListChars),
+    observeSummaryStructuredChars: budgetItem(observe.summary.structuredChars, BUDGETS.observeSummaryStructuredChars),
+    observeFinalStructuredChars: budgetItem(observe.final.structuredChars, BUDGETS.observeFinalStructuredChars),
+    compactMetricsStructuredChars: budgetItem(metrics.compact.structuredChars, BUDGETS.compactMetricsStructuredChars)
+  };
+}
+
+function budgetItem(actual, max) {
+  return {
+    actual,
+    max,
+    ok: actual <= max,
+    headroomChars: max - actual
   };
 }
 

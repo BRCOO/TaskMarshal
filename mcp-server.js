@@ -230,7 +230,7 @@ function registerWorkerTools() {
       provider: Provider.default("reasonix").describe("Worker provider to inspect."),
       id: z.string().min(1).describe("Worker session id."),
       tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
-      mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
+      mode: ObserveMode.default("summary").describe("Observation mode: summary, final, permission, or events."),
       maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields."),
       since: z.number().int().min(0).default(0).describe("Optional event cursor from a previous observe call.")
     },
@@ -571,7 +571,7 @@ function registerReasonixCompatTools() {
     inputSchema: {
       id: z.string().min(1).describe("Reasonix session id."),
       tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
-      mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
+      mode: ObserveMode.default("summary").describe("Observation mode: summary, final, permission, or events."),
       maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields."),
       since: z.number().int().min(0).default(0).describe("Optional event cursor from a previous observe call.")
     },
@@ -882,7 +882,7 @@ async function claudeSendTask({ id, prompt, taskId }) {
   return success({ provider: "claude-code", id, status: "ready", turn, claudeSessionId: meta.claudeSessionId });
 }
 
-function claudeObserve({ id, tail, mode = "events", maxChars = 12000, since = 0 }) {
+function claudeObserve({ id, tail, mode = "summary", maxChars = 12000, since = 0 }) {
   const meta = readClaudeMeta(id);
   const publicMeta = compactClaudeMeta(meta);
   const eventWindow = readJsonlWindow(meta.events, { tail, since });

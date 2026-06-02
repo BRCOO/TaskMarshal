@@ -76,7 +76,9 @@ It compares:
 - normal `worker_metrics_report` vs `compact: true`
 
 The benchmark reports exact character counts and approximate token counts
-using 4 chars/token. Treat chars as the stable regression metric.
+using 4 chars/token. Treat chars as the stable regression metric. Current hard
+budgets are: minimal tool list <= 10500 chars, observe summary <= 900 chars,
+observe final <= 800 chars, and compact metrics <= 3600 chars.
 
 ## Delegation Packet
 
@@ -106,7 +108,8 @@ where Codex already provided exact edits.
 
 ## Observation Modes
 
-Use compact observation for routine supervision:
+`worker_observe` defaults to `summary` mode. Use compact observation for routine
+supervision:
 
 ```text
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)

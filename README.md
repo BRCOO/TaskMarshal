@@ -234,7 +234,8 @@ npm run eval:tokens
 
 The benchmark compares standard vs minimal MCP tool-list size, event observation
 vs summary/final observation size, and normal vs compact metrics output. It
-reports exact character counts plus an approximate token estimate.
+reports exact character counts plus an approximate token estimate, and fails if
+compact paths exceed fixed budgets.
 
 ## Provider Matrix
 
@@ -258,7 +259,7 @@ Provider-neutral tools:
 | `worker_list_sessions` | List known worker sessions. |
 | `worker_status` | Inspect one worker session. |
 | `worker_send_task` | Send a bounded task to a session. |
-| `worker_observe` | Read recent worker events. |
+| `worker_observe` | Read compact worker state by default; pass `mode: "events"` only for raw event tails. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
 | `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, finalize, and ordered batches. |
@@ -301,7 +302,8 @@ Observation modes:
 | `permission` | Pending permission state only. |
 | `events` | Full recent event tail for debugging worker behavior. |
 
-Use `maxChars` to cap large text fields before they enter Codex context.
+`worker_observe` defaults to `summary` mode. Use `maxChars` to cap large text
+fields before they enter Codex context.
 Use the returned `cursor.cursor` as `since` on the next `worker_observe` call
 to read only new events.
 
@@ -387,7 +389,7 @@ Claude Code provider through MCP:
 worker_ask(provider: "claude-code", prompt: "Analyze this repo in plan mode", approve: "cancel")
 worker_start_session(provider: "claude-code", id: "claude-review", approve: "cancel")
 worker_send_task(provider: "claude-code", id: "claude-review", taskId: "task", prompt: "Review these files")
-worker_observe(provider: "claude-code", id: "claude-review", tail: 20)
+worker_observe(provider: "claude-code", id: "claude-review", mode: "summary", tail: 20)
 ```
 
 Claude Code does not expose an external permission callback to TaskMarshal. `worker_approve`, `worker_deny`, and `worker_cancel` return unsupported for `claude-code`; use Claude Code permission modes for safety.

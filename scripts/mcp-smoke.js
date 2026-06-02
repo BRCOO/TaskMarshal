@@ -173,6 +173,8 @@ const hasUsableCompactMetrics = compactMetricsData?.compact === true
   && compactMetricsData?.taskVerification?.recent === undefined;
 const proReviewData = proReviewPlan?.structuredContent?.data;
 const compactTextOk = !compactText || routeDecision.content?.[0]?.text?.startsWith("ok ");
+const observeTool = tools.tools.find((tool) => tool.name === "worker_observe");
+const observeDefaultsToSummary = observeTool?.inputSchema?.properties?.mode?.default === "summary";
 const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
   && proReviewData?.model === "deepseek-v4-pro"
   && proReviewData?.startSession?.model === "pro"
@@ -197,6 +199,7 @@ const ok = hasWorkerSendTask
     && (profile === "minimal" || hasWorkerPlanProReview)
     && (profile === "minimal" || hasUsableProReviewPlan)
     && compactTextOk
+    && observeDefaultsToSummary
     && (!expectsLegacyHidden || !hasReasonixAlias)
     && (!expectsLegacyHidden || !hasReasonixSummarizeAlias)
     && (!expectsLegacyHidden || !hasReasonixMetricsAlias)
@@ -216,6 +219,7 @@ console.log(JSON.stringify({
   profile,
   compactText,
   compactTextOk,
+  observeDefaultsToSummary,
   hasWorkerSendTask,
   hasWorkerSummarizeSession,
   hasWorkerMetricsReport,
