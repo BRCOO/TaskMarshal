@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 const cases = [
   {
@@ -39,11 +42,36 @@ if (task.ok && task.data.taskId) {
   results.push({ name: "task gate finalizes", passed: false, data: task.data, error: task.error });
 }
 
+const compactMetrics = run(["metrics", "--limit", "8", "--compact"]);
+results.push({
+  name: "compact metrics",
+  passed: compactMetrics.ok
+    && compactMetrics.data?.compact === true
+    && Array.isArray(compactMetrics.data?.routingHints)
+    && Array.isArray(compactMetrics.data?.recent)
+    && compactMetrics.data.recent.length <= 3,
+  data: compactMetrics.data,
+  error: compactMetrics.error
+});
+
+const observeSessionId = "tm-eval-observe-cursor";
+createSyntheticSession(observeSessionId);
+const observeOne = run(["observe", observeSessionId, "--mode", "summary", "--tail", "5"], false);
+if (observeOne.ok && Number.isInteger(observeOne.data?.cursor?.cursor)) {
+  const observeTwo = run(["observe", observeSessionId, "--mode", "summary", "--tail", "5", "--since", String(observeOne.data.cursor.cursor)], false);
+  results.push({
+    name: "observe cursor",
+    passed: observeTwo.ok && observeTwo.data?.cursor?.since === observeOne.data.cursor.cursor,
+    data: observeTwo.data,
+    error: observeTwo.error
+  });
+}
+
 const ok = results.every((item) => item.passed);
 console.log(JSON.stringify({ ok, results }, null, 2));
 if (!ok) process.exitCode = 1;
 
-function run(args) {
+function run(args, includeError = true) {
   const child = spawnSync(process.execPath, ["taskmarshalctl.js", ...args], {
     cwd: process.cwd(),
     encoding: "utf8"
@@ -57,6 +85,35 @@ function run(args) {
   return {
     ok: child.status === 0 && data?.ok !== false,
     data,
-    error: child.stderr || data?.error || null
+    error: includeError ? child.stderr || data?.error || null : null
   };
+}
+
+function createSyntheticSession(id) {
+  const sessionDir = resolve(homedir(), ".reasonixctl", "sessions", id);
+  if (existsSync(sessionDir)) rmSync(sessionDir, { recursive: true, force: true });
+  mkdirSync(sessionDir, { recursive: true });
+  const eventsPath = resolve(sessionDir, "events.jsonl");
+  const now = new Date().toISOString();
+  const events = [
+    { ts: now, method: "control/start", id },
+    { ts: now, type: "agent_message_chunk", text: "synthetic" },
+    { ts: now, method: "control/turn_finished", turn: { turnId: "synthetic-turn", finishedAt: now, stopReason: "end_turn" } }
+  ];
+  writeFileSync(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  writeFileSync(resolve(sessionDir, "session.json"), `${JSON.stringify({
+    id,
+    status: "ready",
+    busy: false,
+    pid: null,
+    port: null,
+    token: null,
+    dir: process.cwd(),
+    approve: "cancel",
+    model: "deepseek-v4-flash",
+    events: eventsPath,
+    errors: [],
+    lastTurn: events.at(-1).turn,
+    updatedAt: now
+  }, null, 2)}\n`, "utf8");
 }

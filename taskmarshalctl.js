@@ -251,9 +251,9 @@ async function sendSession(args) {
 }
 
 async function observeSession(args) {
-  const { id, tail, mode, maxChars } = parseObserveArgs(args);
+  const { id, tail, mode, maxChars, since } = parseObserveArgs(args);
   const meta = readSessionMeta(id);
-  const lines = readTailJsonl(meta.events, tail);
+  const eventWindow = readJsonlWindow(meta.events, { tail, since });
   let daemonStatus = null;
   try {
     daemonStatus = await daemonRequest(meta, "GET", "/status");
@@ -264,8 +264,9 @@ async function observeSession(args) {
     id,
     mode,
     maxChars,
+    eventWindow,
     status: daemonStatus,
-    events: displayEvents(lines),
+    events: displayEvents(eventWindow.events),
     meta
   }));
 }
@@ -742,10 +743,12 @@ function parseObserveArgs(args) {
   let tail = 40;
   let mode = "events";
   let maxChars = 12000;
+  let since = 0;
   for (let i = 1; i < args.length; i += 1) {
     if (args[i] === "--tail") tail = Number(args[++i] || 40);
     else if (args[i] === "--mode") mode = args[++i] || "events";
     else if (args[i] === "--max-chars") maxChars = Number(args[++i] || 12000);
+    else if (args[i] === "--since") since = Number(args[++i] || 0);
     else throw new Error(`Unknown observe option: ${args[i]}`);
   }
   if (!["events", "summary", "final", "permission"].includes(mode)) {
@@ -754,7 +757,13 @@ function parseObserveArgs(args) {
   if (!Number.isFinite(maxChars) || maxChars < 500) {
     throw new Error("--max-chars must be a number >= 500");
   }
-  return { id, tail, mode, maxChars };
+  if (!Number.isInteger(tail) || tail < 1 || tail > 400) {
+    throw new Error("--tail must be an integer between 1 and 400");
+  }
+  if (!Number.isInteger(since) || since < 0) {
+    throw new Error("--since must be an integer cursor >= 0");
+  }
+  return { id, tail, mode, maxChars, since };
 }
 
 function parseSummarizeArgs(args) {
@@ -777,7 +786,8 @@ function parseMetricsArgs(args) {
     provider: null,
     model: null,
     since: null,
-    maxSessions: 200
+    maxSessions: 200,
+    compact: false
   };
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i];
@@ -786,6 +796,7 @@ function parseMetricsArgs(args) {
     else if (a === "--model") out.model = args[++i] || null;
     else if (a === "--since") out.since = args[++i] || null;
     else if (a === "--max-sessions") out.maxSessions = Number(args[++i] || out.maxSessions);
+    else if (a === "--compact") out.compact = true;
     else throw new Error(`Unknown metrics option: ${a}`);
   }
   if (!Number.isInteger(out.limit) || out.limit < 1 || out.limit > 500) {
@@ -848,7 +859,7 @@ Usage:
   taskmarshalctl doctor
   taskmarshalctl models
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--yolo]
-  taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE]
+  taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE] [--compact]
   taskmarshalctl route --goal TEXT [--scope FILES] [--risk low|medium|high] [--files N]
   taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]
   taskmarshalctl checkpoint --id TASK_ID --step STEP_ID [--note TEXT]
@@ -858,7 +869,7 @@ Usage:
   taskmarshalctl list
   taskmarshalctl status SESSION_ID
   taskmarshalctl send SESSION_ID "prompt"
-  taskmarshalctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N]
+  taskmarshalctl observe SESSION_ID [--tail N] [--mode events|summary|final|permission] [--max-chars N] [--since CURSOR]
   taskmarshalctl summarize SESSION_ID [--max-chars N]
   taskmarshalctl approve SESSION_ID
   taskmarshalctl deny SESSION_ID
@@ -905,7 +916,7 @@ function readJsonOptional(path) {
   }
 }
 
-async function buildMetricsReport({ limit = 20, provider = null, model = null, since = null, maxSessions = 200 } = {}) {
+async function buildMetricsReport({ limit = 20, provider = null, model = null, since = null, maxSessions = 200, compact = false } = {}) {
   const sinceMs = since ? Date.parse(since) : null;
   const records = [];
   const sessionDirs = await listSessionDirs(maxSessions);
@@ -926,18 +937,26 @@ async function buildMetricsReport({ limit = 20, provider = null, model = null, s
   const recent = records.slice(0, limit);
   const totals = summarizeMetrics(records);
   const taskVerification = summarizeTaskVerification(readJsonl(resolve(WORKFLOW_DIR, "task-metrics.jsonl")));
-  return {
+  const report = {
     ok: true,
     generatedAt: new Date().toISOString(),
     source: "reasonix persistent session metrics",
-    filters: { limit, provider, model, since, maxSessions },
+    filters: { limit, provider, model, since, maxSessions, compact },
     totals,
     byModel: groupMetrics(records, "model"),
     byProvider: groupMetrics(records, "provider"),
     taskVerification,
-    recent,
     guidance: buildMetricsGuidance(totals)
   };
+  if (compact) {
+    report.compact = true;
+    report.recentCount = recent.length;
+    report.routingHints = buildRoutingHints({ totals, taskVerification });
+    report.recent = recent.slice(0, Math.min(limit, 3)).map(compactMetricRecord);
+    return report;
+  }
+  report.recent = recent;
+  return report;
 }
 
 async function listSessionDirs(maxSessions) {
@@ -1036,6 +1055,29 @@ function buildMetricsGuidance(totals) {
   }
   if (!guidance.length) guidance.push("Metrics are healthy enough for static Local/flash/pro routing.");
   return guidance;
+}
+
+function buildRoutingHints({ totals, taskVerification }) {
+  const hints = [];
+  const failCount = taskVerification.byStatus.fail || 0;
+  const passCount = taskVerification.byStatus.pass || 0;
+  if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
+  if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (totals.unknownVerificationCount > 0) hints.push("record_verification");
+  if (!hints.length) hints.push("static_route_ok");
+  return hints;
+}
+
+function compactMetricRecord(record) {
+  return {
+    ts: record.ts,
+    provider: record.provider,
+    model: record.model,
+    ok: record.ok,
+    assistantChars: record.assistantChars,
+    verification: record.verification,
+    error: record.error
+  };
 }
 
 function summarizeTaskVerification(records) {
@@ -1419,15 +1461,29 @@ function sendHttp(res, status, body) {
 }
 
 function readTailJsonl(path, count) {
-  if (!existsSync(path)) return [];
+  return readJsonlWindow(path, { tail: count }).events;
+}
+
+function readJsonlWindow(path, { tail = 40, since = 0 } = {}) {
+  if (!existsSync(path)) return { events: [], total: 0, since: 0, cursor: 0, deltaCount: 0 };
   const lines = readFileSync(path, "utf8").trim().split(/\r?\n/).filter(Boolean);
-  return lines.slice(-count).map((line) => {
+  const total = lines.length;
+  const start = since > 0 ? Math.min(since, total) : Math.max(0, total - tail);
+  const selected = lines.slice(start);
+  const events = selected.map((line) => {
     try {
       return JSON.parse(line);
     } catch {
       return { malformed: line };
     }
   });
+  return {
+    events,
+    total,
+    since,
+    cursor: total,
+    deltaCount: Math.max(0, total - start)
+  };
 }
 
 function readJsonl(path) {
@@ -1519,12 +1575,19 @@ function sumBy(items, key) {
   }, 0);
 }
 
-function formatObservation({ id, mode, maxChars, status, events, meta }) {
+function formatObservation({ id, mode, maxChars, status, events, eventWindow, meta }) {
   const safeStatus = compactSessionStatus(status, maxChars);
+  const cursor = eventWindow ? {
+    since: eventWindow.since,
+    cursor: eventWindow.cursor,
+    total: eventWindow.total,
+    deltaCount: eventWindow.deltaCount
+  } : null;
   const base = {
     ok: true,
     id,
     mode,
+    cursor,
     status: safeStatus
   };
   if (mode === "summary") {

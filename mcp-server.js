@@ -220,12 +220,13 @@ function registerWorkerTools() {
       id: z.string().min(1).describe("Worker session id."),
       tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
       mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
-      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields.")
+      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields."),
+      since: z.number().int().min(0).default(0).describe("Optional event cursor from a previous observe call.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ provider, id, tail, mode, maxChars }) => routeProvider(provider, {
-    reasonix: () => runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars)]),
-    "claude-code": () => claudeObserve({ id, tail, mode, maxChars })
+  }, async ({ provider, id, tail, mode, maxChars, since }) => routeProvider(provider, {
+    reasonix: () => runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars), "--since", String(since)]),
+    "claude-code": () => claudeObserve({ id, tail, mode, maxChars, since })
   }));
 
   if (enabled("worker_summarize_session")) server.registerTool("worker_summarize_session", {
@@ -250,24 +251,26 @@ function registerWorkerTools() {
       limit: z.number().int().min(1).max(500).default(20).describe("Maximum recent metric records to include."),
       model: z.string().optional().describe("Optional model filter."),
       since: z.string().optional().describe("Optional parseable date or timestamp filter."),
-      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan.")
+      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan."),
+      compact: z.boolean().default(false).describe("Return compact aggregates plus up to three recent records.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ provider, limit, model, since, maxSessions }) => routeProvider(provider, {
+  }, async ({ provider, limit, model, since, maxSessions, compact }) => routeProvider(provider, {
     reasonix: () => {
       const args = ["metrics", "--limit", String(limit), "--max-sessions", String(maxSessions)];
       if (model) args.push("--model", model);
       if (since) args.push("--since", since);
+      if (compact) args.push("--compact");
       return runCtl(args);
     },
-    "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions })
+    "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions, compact })
   }));
 
   server.registerTool("worker_task_gate", {
     title: "TaskMarshal Task Gate",
     description: "Merged token-firewall task gate: route, create, checkpoint, verify, or finalize.",
     inputSchema: {
-      action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).describe("Gate action."),
+      action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).default("route").describe("Gate action."),
       goal: z.string().default("").describe("Short task goal for route/create."),
       scope: z.string().default("").describe("Comma-separated files or modules."),
       risk: RouteRisk.default("medium").describe("Risk level."),
@@ -279,7 +282,22 @@ function registerWorkerTools() {
       status: VerificationStatus.optional().describe("Verification status for verify."),
       command: z.string().default("").describe("Verification command for verify."),
       exitCode: z.number().int().optional().describe("Command exit code for verify."),
-      note: z.string().default("").describe("Short note.")
+      note: z.string().default("").describe("Short note."),
+      batch: z.array(z.object({
+        action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]),
+        goal: z.string().optional(),
+        scope: z.string().optional(),
+        risk: RouteRisk.optional(),
+        files: z.number().int().min(0).max(200).optional(),
+        route: z.enum(["local", "flash", "pro"]).optional(),
+        steps: z.string().optional(),
+        id: z.string().optional(),
+        step: z.string().optional(),
+        status: VerificationStatus.optional(),
+        command: z.string().optional(),
+        exitCode: z.number().int().optional(),
+        note: z.string().optional()
+      })).max(8).optional().describe("Optional ordered batch of gate actions.")
     },
     annotations: readOnlyAnnotations()
   }, async (input) => toolResult(await runTaskGate(input)));
@@ -529,11 +547,12 @@ function registerReasonixCompatTools() {
       id: z.string().min(1).describe("Reasonix session id."),
       tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
       mode: ObserveMode.default("events").describe("Observation mode: events, summary, final, or permission."),
-      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields.")
+      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields."),
+      since: z.number().int().min(0).default(0).describe("Optional event cursor from a previous observe call.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ id, tail, mode, maxChars }) => {
-    return toolResult(await runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars)]));
+  }, async ({ id, tail, mode, maxChars, since }) => {
+    return toolResult(await runCtl(["observe", id, "--tail", String(tail), "--mode", mode, "--max-chars", String(maxChars), "--since", String(since)]));
   });
 
   server.registerTool("reasonix_summarize_session", {
@@ -555,13 +574,15 @@ function registerReasonixCompatTools() {
       limit: z.number().int().min(1).max(500).default(20).describe("Maximum recent metric records to include."),
       model: z.string().optional().describe("Optional model filter."),
       since: z.string().optional().describe("Optional parseable date or timestamp filter."),
-      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan.")
+      maxSessions: z.number().int().min(1).max(2000).default(200).describe("Maximum session directories to scan."),
+      compact: z.boolean().default(false).describe("Return compact aggregates plus up to three recent records.")
     },
     annotations: readOnlyAnnotations()
-  }, async ({ limit, model, since, maxSessions }) => {
+  }, async ({ limit, model, since, maxSessions, compact }) => {
     const args = ["metrics", "--limit", String(limit), "--max-sessions", String(maxSessions)];
     if (model) args.push("--model", model);
     if (since) args.push("--since", since);
+    if (compact) args.push("--compact");
     return toolResult(await runCtl(args));
   });
 
@@ -615,6 +636,40 @@ async function routeProvider(provider, handlers) {
 }
 
 async function runTaskGate(input) {
+  if (Array.isArray(input.batch) && input.batch.length) {
+    const results = [];
+    for (let index = 0; index < input.batch.length; index += 1) {
+      const item = { ...input, ...input.batch[index], batch: undefined };
+      const result = await runTaskGate(item);
+      results.push({
+        index,
+        action: item.action,
+        ok: Boolean(result.ok),
+        data: result.data,
+        error: result.error ?? null,
+        exitCode: result.exitCode ?? null
+      });
+      if (!result.ok) {
+        return success({
+          action: "batch",
+          ok: false,
+          completed: results.filter((entry) => entry.ok).length,
+          total: input.batch.length,
+          stoppedAt: index,
+          results,
+          next: "fix_failed_batch_item"
+        });
+      }
+    }
+    return success({
+      action: "batch",
+      ok: true,
+      completed: results.length,
+      total: results.length,
+      results,
+      next: "continue"
+    });
+  }
   const action = input.action;
   if (action === "route") {
     const missing = missingFields(input, ["goal"]);
@@ -794,15 +849,23 @@ async function claudeSendTask({ id, prompt }) {
   return success({ provider: "claude-code", id, status: "ready", turn, claudeSessionId: meta.claudeSessionId });
 }
 
-function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
+function claudeObserve({ id, tail, mode = "events", maxChars = 12000, since = 0 }) {
   const meta = readClaudeMeta(id);
   const publicMeta = compactClaudeMeta(meta);
-  const events = readTailJsonl(meta.events, tail);
+  const eventWindow = readJsonlWindow(meta.events, { tail, since });
+  const events = eventWindow.events;
+  const cursor = {
+    since: eventWindow.since,
+    cursor: eventWindow.cursor,
+    total: eventWindow.total,
+    deltaCount: eventWindow.deltaCount
+  };
   if (mode === "summary") {
     return success(compactTextFields({
       provider: "claude-code",
       id,
       mode,
+      cursor,
       status: publicMeta,
       lastTurn: summarizeClaudeTurn(meta.lastTurn),
       eventCount: events.length,
@@ -814,6 +877,7 @@ function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
       provider: "claude-code",
       id,
       mode,
+      cursor,
       status: publicMeta,
       final: meta.lastTurn?.assistantText ?? null,
       lastTurn: summarizeClaudeTurn(meta.lastTurn)
@@ -824,6 +888,7 @@ function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
       provider: "claude-code",
       id,
       mode,
+      cursor,
       status: publicMeta,
       pendingPermission: null,
       warnings: [
@@ -835,6 +900,7 @@ function claudeObserve({ id, tail, mode = "events", maxChars = 12000 }) {
     provider: "claude-code",
     id,
     mode,
+    cursor,
     status: publicMeta,
     events
   }, maxChars));
@@ -894,7 +960,7 @@ function claudeSummarizeSession({ id, maxChars = 6000 }) {
   }, maxChars));
 }
 
-function claudeMetricsReport({ limit = 20, model = null, since = null, maxSessions = 200 }) {
+function claudeMetricsReport({ limit = 20, model = null, since = null, maxSessions = 200, compact = false }) {
   mkdirSync(CLAUDE_SESSION_DIR, { recursive: true });
   const sinceMs = since ? Date.parse(since) : null;
   const records = readdirSync(CLAUDE_SESSION_DIR, { withFileTypes: true })
@@ -913,16 +979,24 @@ function claudeMetricsReport({ limit = 20, model = null, since = null, maxSessio
     .sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
   const recent = records.slice(0, limit);
   const totals = summarizeMetrics(records);
-  return success({
+  const report = {
     generatedAt: new Date().toISOString(),
     source: "claude-code logical session metadata",
-    filters: { limit, provider: "claude-code", model, since, maxSessions },
+    filters: { limit, provider: "claude-code", model, since, maxSessions, compact },
     totals,
     byModel: groupMetrics(records, "model"),
     byProvider: groupMetrics(records, "provider"),
-    recent,
     guidance: buildMetricsGuidance(totals)
-  });
+  };
+  if (compact) {
+    report.compact = true;
+    report.recentCount = recent.length;
+    report.routingHints = buildRoutingHints({ totals, taskVerification: { byStatus: {} } });
+    report.recent = recent.slice(0, Math.min(limit, 3)).map(compactMetricRecord);
+    return success(report);
+  }
+  report.recent = recent;
+  return success(report);
 }
 
 function claudeMetricRecords(meta) {
@@ -1237,19 +1311,29 @@ function appendJsonl(path, value) {
 }
 
 function readTailJsonl(path, count) {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
-    .trim()
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .slice(-count)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return { malformed: line };
-      }
-    });
+  return readJsonlWindow(path, { tail: count }).events;
+}
+
+function readJsonlWindow(path, { tail = 40, since = 0 } = {}) {
+  if (!existsSync(path)) return { events: [], total: 0, since: 0, cursor: 0, deltaCount: 0 };
+  const lines = readFileSync(path, "utf8").trim().split(/\r?\n/).filter(Boolean);
+  const total = lines.length;
+  const start = since > 0 ? Math.min(since, total) : Math.max(0, total - tail);
+  const selected = lines.slice(start);
+  const events = selected.map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return { malformed: line };
+    }
+  });
+  return {
+    events,
+    total,
+    since,
+    cursor: total,
+    deltaCount: Math.max(0, total - start)
+  };
 }
 
 function summarizeMetrics(records) {
@@ -1306,6 +1390,29 @@ function buildMetricsGuidance(totals) {
   }
   if (!guidance.length) guidance.push("Metrics are healthy enough for static Local/flash/pro routing.");
   return guidance;
+}
+
+function buildRoutingHints({ totals, taskVerification }) {
+  const hints = [];
+  const failCount = taskVerification.byStatus?.fail || 0;
+  const passCount = taskVerification.byStatus?.pass || 0;
+  if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
+  if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (totals.unknownVerificationCount > 0) hints.push("record_verification");
+  if (!hints.length) hints.push("static_route_ok");
+  return hints;
+}
+
+function compactMetricRecord(record) {
+  return {
+    ts: record.ts,
+    provider: record.provider,
+    model: record.model,
+    ok: record.ok,
+    assistantChars: record.assistantChars,
+    verification: record.verification,
+    error: record.error
+  };
 }
 
 function sumBy(items, key) {

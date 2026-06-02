@@ -29,6 +29,9 @@ taskKey.
 
 The individual gate tools remain available in the standard MCP profile for
 compatibility, but `worker_task_gate` is the preferred low-token path.
+Use `worker_task_gate(batch: [...])` when Codex already knows several gate
+operations can run in order, such as checkpointing all completed steps, recording
+verification, and finalizing.
 
 ## MCP Token Controls
 
@@ -76,10 +79,11 @@ Use compact observation for routine supervision:
 
 ```text
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
+worker_observe(provider: "reasonix", id: "audit", mode: "summary", since: 120, maxChars: 4000)
 worker_observe(provider: "reasonix", id: "audit", mode: "permission", maxChars: 2000)
 worker_observe(provider: "reasonix", id: "audit", mode: "final", maxChars: 6000)
 worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
-worker_metrics_report(provider: "reasonix", limit: 20)
+worker_metrics_report(provider: "reasonix", limit: 20, compact: true)
 ```
 
 Use full event observation only when compact state is not enough:
@@ -87,6 +91,10 @@ Use full event observation only when compact state is not enough:
 ```text
 worker_observe(provider: "reasonix", id: "audit", mode: "events", tail: 80)
 ```
+
+Every observation returns a numeric `cursor.cursor`. Pass that value as `since`
+on the next observation to get only new events. This keeps long worker sessions
+from replaying the same event tail into Codex context.
 
 ## Yield Protocol
 
@@ -118,6 +126,8 @@ report includes recent turns, model/provider aggregates, average assistant
 output size, permission counts, verification coverage, and routing guidance.
 Task-gate verification records are included in the same report so Codex can
 see recent pass/fail/skip outcomes without loading task ledgers.
+Use `compact: true` for normal routing checks; it returns aggregates, routing
+hints, and at most three recent records.
 
 ## Pro Second Pass
 

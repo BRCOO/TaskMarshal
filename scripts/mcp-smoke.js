@@ -31,6 +31,14 @@ const metricsReport = await client.callTool({
     limit: 3
   }
 });
+const compactMetricsReport = await client.callTool({
+  name: "worker_metrics_report",
+  arguments: {
+    provider: "reasonix",
+    limit: 8,
+    compact: true
+  }
+});
 const routeDecision = await client.callTool({
   name: "worker_task_gate",
   arguments: {
@@ -115,15 +123,51 @@ const finalizeResult = taskId ? await client.callTool({
   name: "worker_task_gate",
   arguments: { action: "finalize", id: taskId }
 }) : null;
+const batchCreate = await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    batch: [
+      {
+        action: "create",
+        goal: "Smoke-test batch task gate.",
+        scope: "taskmarshalctl.js",
+        risk: "low",
+        route: "flash",
+        steps: "plan;verify"
+      }
+    ]
+  }
+});
+const batchTaskId = batchCreate.structuredContent?.data?.results?.[0]?.data?.taskId;
+const batchFinalize = batchTaskId ? await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    batch: [
+      { action: "checkpoint", id: batchTaskId, step: "s1", note: "batch smoke" },
+      { action: "checkpoint", id: batchTaskId, step: "s2", note: "batch smoke" },
+      { action: "verify", id: batchTaskId, status: "pass", command: "batch-smoke" },
+      { action: "finalize", id: batchTaskId }
+    ]
+  }
+}) : null;
 const verifyData = verifyResult?.structuredContent?.data;
 const checkpointData = checkpointTwo?.structuredContent?.data;
 const finalizeData = finalizeResult?.structuredContent?.data;
+const compactMetricsData = compactMetricsReport.structuredContent?.data;
+const batchFinalizeData = batchFinalize?.structuredContent?.data;
 const hasUsableTaskGate = Boolean(taskId)
   && taskData?.artifactRoot
   && checkpointData?.completed === 2
   && verifyData?.verification === "pass"
   && finalizeData?.done === true
   && typeof finalizeData?.taskKey === "string";
+const hasUsableBatchGate = batchCreate.structuredContent?.data?.action === "batch"
+  && batchFinalizeData?.action === "batch"
+  && batchFinalizeData?.ok === true
+  && batchFinalizeData?.results?.at(-1)?.data?.done === true;
+const hasUsableCompactMetrics = compactMetricsData?.compact === true
+  && Array.isArray(compactMetricsData?.routingHints)
+  && compactMetricsData?.recent?.length <= 3;
 const proReviewData = proReviewPlan?.structuredContent?.data;
 const compactTextOk = !compactText || routeDecision.content?.[0]?.text?.startsWith("ok ");
 const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
@@ -137,6 +181,7 @@ const ok = hasWorkerSendTask
     && (profile === "minimal" || hasWorkerSummarizeSession)
     && hasWorkerMetricsReport
     && hasUsableMetricsReport
+    && hasUsableCompactMetrics
     && hasWorkerTaskGate
     && hasUsableRouteDecision
     && (profile === "minimal" || hasWorkerRouteDecision)
@@ -145,6 +190,7 @@ const ok = hasWorkerSendTask
     && (profile === "minimal" || hasWorkerRecordVerification)
     && (profile === "minimal" || hasWorkerFinalizeTask)
     && hasUsableTaskGate
+    && hasUsableBatchGate
     && (profile === "minimal" || hasWorkerPlanProReview)
     && (profile === "minimal" || hasUsableProReviewPlan)
     && compactTextOk
@@ -171,6 +217,7 @@ console.log(JSON.stringify({
   hasWorkerSummarizeSession,
   hasWorkerMetricsReport,
   hasUsableMetricsReport,
+  hasUsableCompactMetrics,
   hasWorkerTaskGate,
   hasWorkerRouteDecision,
   hasUsableRouteDecision,
@@ -179,6 +226,7 @@ console.log(JSON.stringify({
   hasWorkerRecordVerification,
   hasWorkerFinalizeTask,
   hasUsableTaskGate,
+  hasUsableBatchGate,
   hasWorkerPlanProReview,
   hasUsableProReviewPlan,
   hasReasonixAlias,

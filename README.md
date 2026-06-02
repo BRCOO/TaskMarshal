@@ -59,7 +59,9 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Cross-session metrics reports for routing and token-efficiency tuning
 - Token-firewall task gates with short control packets and task keys
 - Merged `worker_task_gate` for route/create/checkpoint/verify/finalize control
+- Batch task gate calls for fewer MCP round trips
 - Minimal MCP tool profile and compact tool text mode for lower Codex context use
+- Incremental observation cursors and compact metrics reports
 - Pro second-pass review planning for higher-risk verification
 - Codex Skill for autonomous delegation decisions
 - TaskSpec and worker yield templates for bounded delegation
@@ -206,7 +208,7 @@ Provider-neutral tools:
 | `worker_observe` | Read recent worker events. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
-| `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, and finalize. |
+| `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, finalize, and ordered batches. |
 | `worker_route_decision` | Return a short deterministic Local/flash/pro routing decision. |
 | `worker_create_task` | Create a local token-firewall task ledger and return a short control packet. |
 | `worker_checkpoint_step` | Mark one task step done. |
@@ -247,6 +249,8 @@ Observation modes:
 | `events` | Full recent event tail for debugging worker behavior. |
 
 Use `maxChars` to cap large text fields before they enter Codex context.
+Use the returned `cursor.cursor` as `since` on the next `worker_observe` call
+to read only new events.
 
 Reasonix compatibility aliases are also available:
 
@@ -291,7 +295,7 @@ Use the Reasonix adapter without MCP:
 node taskmarshalctl.js doctor
 node taskmarshalctl.js models
 node taskmarshalctl.js smoke
-node taskmarshalctl.js metrics --limit 10
+node taskmarshalctl.js metrics --limit 10 --compact
 node taskmarshalctl.js ask "Summarize this repository. Do not edit files." --approve cancel
 node taskmarshalctl.js ask "Review this design for risks." --approve cancel --model pro
 ```
@@ -303,6 +307,7 @@ node taskmarshalctl.js start --id architect --dir C:\\path\\to\\repo --approve m
 node taskmarshalctl.js start --id reviewer --dir C:\\path\\to\\repo --approve manual --model pro
 node taskmarshalctl.js send architect "Analyze the repo. Do not edit files."
 node taskmarshalctl.js observe architect --mode summary --max-chars 4000
+node taskmarshalctl.js observe architect --mode summary --since 120 --max-chars 4000
 node taskmarshalctl.js summarize architect --max-chars 6000
 node taskmarshalctl.js approve architect
 node taskmarshalctl.js deny architect
@@ -339,6 +344,11 @@ The economical TaskMarshal loop is:
 7. Codex records verification with `worker_task_gate(action: "verify")`.
 8. Codex finalizes with `worker_task_gate(action: "finalize")` and accepts only with a taskKey.
 
+When several gate operations are ready at once, Codex can use
+`worker_task_gate(batch: [...])` to reduce MCP round trips. For long worker
+sessions, Codex should observe once, store the returned cursor, then pass it as
+`since` on the next observation to avoid re-reading old event tails.
+
 Task ledgers are written under local `.taskmarshal/tasks/` and are gitignored.
 MCP tools return short control packets by default; large task artifacts stay on
 disk unless explicitly inspected.
@@ -355,7 +365,8 @@ turns append lightweight metrics to `metrics.jsonl`, including model, elapsed
 time, prompt/assistant character counts, permission counts, errors, and
 verification placeholders for future routing feedback.
 
-Use `worker_metrics_report` or `taskmarshalctl metrics --limit 20` to inspect
+Use `worker_metrics_report(compact: true)` or
+`taskmarshalctl metrics --limit 20 --compact` to inspect
 recent turns without loading raw `events.jsonl` or transcripts into Codex
 context. Verification records from task gates are included in the metrics
 report, so routing quality can be judged from local pass/fail/skip evidence.

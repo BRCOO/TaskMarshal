@@ -14,6 +14,7 @@ delegation more controlled, verifiable, and reusable.
   logs by default.
 - [x] Add a minimal MCP tool profile and compact tool-result text mode.
 - [x] Add a merged task gate for route/create/checkpoint/verify/finalize.
+- [x] Add incremental observe cursors, compact metrics, and batch gate calls.
 - [x] Add a local eval suite for routing and task-gate behavior.
 - [x] Update README/docs to explain the lean Codex + structured worker protocol.
 - [x] Sync the installed local TaskMarshal skill after repo changes.
@@ -60,6 +61,15 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add merged `worker_task_gate`.
   - Acceptance: Codex can route, create, checkpoint, verify, and finalize a
     task through one MCP tool in minimal profile.
+- [x] Add incremental observation cursors.
+  - Acceptance: `worker_observe` returns a cursor and accepts `since` to avoid
+    replaying old event tails.
+- [x] Add compact metrics mode.
+  - Acceptance: `worker_metrics_report(compact: true)` returns aggregates,
+    routing hints, and at most three recent records.
+- [x] Add batch gate calls.
+  - Acceptance: Codex can run ordered gate operations through one
+    `worker_task_gate(batch: [...])` call.
 
 ## P2 - Worker Quality Gates
 

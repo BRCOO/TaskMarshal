@@ -133,15 +133,19 @@ Use persistent sessions:
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
 worker_send_task(provider: "reasonix", id: "audit", prompt: "<bounded task spec>")
 worker_observe(provider: "reasonix", id: "audit", mode: "summary", maxChars: 4000)
+worker_observe(provider: "reasonix", id: "audit", mode: "summary", since: 120, maxChars: 4000)
 worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
-worker_metrics_report(provider: "reasonix", limit: 20)
+worker_metrics_report(provider: "reasonix", limit: 20, compact: true)
 ```
 
-Use `worker_observe(mode: "events")` only when compact summary/final/permission
+Every observation returns a numeric cursor. Pass it as `since` on the next
+observe call to avoid re-reading old event tails. Use
+`worker_observe(mode: "events")` only when compact summary/final/permission
 views are not enough.
 
 Use `worker_metrics_report` when deciding whether routing is saving tokens or
-when repeated worker turns feel too verbose, slow, or weakly verified.
+when repeated worker turns feel too verbose, slow, or weakly verified. Prefer
+`compact: true` for normal routing checks.
 
 For substantial delegated work, prefer the merged token-firewall gate. Codex
 should pass short fields, then rely on local task ledgers and taskKey gates:
@@ -153,6 +157,10 @@ worker_task_gate(action: "checkpoint", id: "task", step: "s1")
 worker_task_gate(action: "verify", id: "task", status: "pass")
 worker_task_gate(action: "finalize", id: "task")
 ```
+
+Use `worker_task_gate(batch: [...])` when several gate operations can run in one
+ordered call, for example checkpoint completed steps, record verification, and
+finalize.
 
 If only individual gate tools are available, use the equivalent
 `worker_route_decision`, `worker_create_task`, `worker_checkpoint_step`,
