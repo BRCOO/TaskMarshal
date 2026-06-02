@@ -106,6 +106,7 @@ npm run check
 npm run mcp:smoke
 npm run eval
 npm run eval:tokens
+npm run eval:quality
 ```
 
 ### 3. Register the MCP server with Codex
@@ -230,12 +231,20 @@ To quantify token-saving regressions, run:
 
 ```bash
 npm run eval:tokens
+npm run eval:quality
 ```
 
 The benchmark compares standard vs minimal MCP tool-list size, event observation
 vs summary/final observation size, and normal vs compact metrics output. It
 reports exact character counts plus an approximate token estimate, and fails if
 compact paths exceed fixed budgets.
+
+The quality benchmark uses deterministic local fixtures to exercise the same
+compact metrics path used by routing. It checks worker success rate, task
+verification pass rate, unknown-verification rate, redo count, average compact
+assistant output size, output-contract coverage, and compact metrics payload
+size. It is a regression gate for telemetry quality; live worker A/B quality
+still needs real task verification records.
 
 ## Provider Matrix
 
