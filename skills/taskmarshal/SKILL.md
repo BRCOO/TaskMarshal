@@ -35,6 +35,12 @@ Do not delegate by default for quick Q&A, simple terminal checks, tiny
 one-file patches, formatting-only edits, routine docs, or short lookups Codex
 can verify directly.
 
+Keep local to Codex when the task depends on user-specific local state outside
+the repository, such as `~/.codex`, `~/.agents`, installed skills, MCP config,
+API-key config, shell profiles, or other home-directory files. Workers may run
+with different permissions or a narrower sandbox, so they are not reliable
+auditors for these paths unless the user explicitly asks to grant that access.
+
 Use TaskMarshal when at least one is true:
 
 - user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Claude Code,
@@ -59,6 +65,8 @@ Score the task before starting a worker:
 - `-2` quick answer, simple command, or obvious local edit
 - `-2` simple lookup or short research answer Codex can verify directly
 - `-2` tiny one-file patch with clear implementation
+- `-3` task depends on local Codex/skill/MCP config, user home directories, or
+  private machine state that the worker may not be allowed to read
 - `-1` worker would need broad permissions before Codex scopes the work
 
 Decision:
@@ -79,6 +87,11 @@ Do not show the numeric score unless it helps explain a decision.
   persistent session, send the task, observe opportunistically, and keep local
   work moving.
 
+If an async audit hits a permission boundary, stop or ignore that worker turn,
+record the limitation, and continue with local evidence. Do not tell the user
+that Codex will merge an independent opinion from a worker that cannot inspect
+the required files.
+
 ## Provider Choice
 
 - Default to `reasonix` when external permission gating and event observation
@@ -96,6 +109,9 @@ Do not show the numeric score unless it helps explain a decision.
   review, and user communication.
 - Workers execute bounded tasks. Treat worker output as a proposed patch, not
   accepted work.
+- Do not ask workers to inspect Codex's installed skills, user MCP config, API
+  key config, or other home-directory state unless the user explicitly approves
+  that scope.
 - Send compact task specs instead of chat transcripts. Use
   `examples/task-spec.yaml` for Full Marshal tasks.
 - Require a short worker plan before edits on Full Marshal tasks unless the

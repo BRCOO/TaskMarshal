@@ -24,6 +24,11 @@ const cases = [
     name: "security pro",
     args: ["route", "--goal", "security auth migration review", "--scope", "auth.js", "--risk", "high", "--files", "1"],
     expect: (data) => data.route === "pro"
+  },
+  {
+    name: "local machine state stays local",
+    args: ["route", "--goal", "audit installed TaskMarshal skill in ~/.codex/skills", "--scope", "~/.codex/skills/taskmarshal/SKILL.md", "--risk", "medium", "--files", "3"],
+    expect: (data) => data.route === "local" && data.reasonCodes?.includes("LOCAL_MACHINE_STATE")
   }
 ];
 

@@ -11,6 +11,22 @@ The main token-saving rule is simple: do not use Codex as a transcript carrier.
 Codex should send a compact `TaskSpec`, observe compact session state, and read
 full logs only when debugging the worker itself.
 
+## Local-Only Boundaries
+
+Keep work local to Codex when the request depends on user-specific machine
+state outside the repository, including installed Codex skills, `~/.codex`,
+`~/.agents`, MCP config, provider API-key config, shell profiles, or other
+home-directory files. Workers may run with different permissions or narrower
+sandboxes, so they are not reliable independent auditors for those paths unless
+the user explicitly grants that scope.
+
+If a worker audit is already running and hits a permission boundary, stop or
+ignore that turn, record the limitation, and continue from local evidence. Do
+not wait on the worker or promise to merge findings from files it cannot read.
+This avoids the failure pattern where Codex says an independent Reasonix audit
+is still pending even though the worker is blocked from the relevant skill or
+config directory.
+
 ## Token Firewall
 
 Codex should exchange short control packets, not long task specs. Use:

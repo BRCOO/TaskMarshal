@@ -19,6 +19,12 @@ Do not start a worker for quick answers, simple shell checks, tiny obvious
 patches, formatting-only edits, or routine documentation edits unless the user
 explicitly asks for a worker.
 
+Keep local to Codex when the request depends on user-specific local state outside
+the repository, including `~/.codex`, `~/.agents`, installed skills, MCP config,
+API-key config, shell profiles, or other home-directory files. Workers may have
+different permissions and should not be used as auditors for these paths unless
+the user explicitly approves that scope.
+
 When using Reasonix:
 
 - Prefer `model: "flash"` for exploration, routine implementation, low-cost
@@ -29,6 +35,10 @@ When using Reasonix:
 - For broad audits, technical research, or slow repo inspection, do not use
   `worker_ask` / `reasonix_ask`; start a persistent session, send the task,
   observe opportunistically, and continue local progress.
+- If a worker hits a permission boundary while auditing, stop or ignore that
+  worker turn, state the limitation, and continue from local evidence. Do not
+  promise to merge independent worker findings from files the worker cannot
+  inspect.
 
 Show the routing result near the start of technical turns using one concise
 line:

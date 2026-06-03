@@ -1448,6 +1448,7 @@ function buildRouteDecision({ input, metrics }) {
   const scope = splitList(input.scope);
   const risk = normalizeRisk(input.risk);
   const files = Number(input.files ?? scope.length) || scope.length;
+  const localOnly = isLocalMachineStateTask(goal, scope);
   const explicitRoute = ["local", "flash", "pro"].includes(String(input.route || "").toLowerCase())
     ? String(input.route).toLowerCase()
     : null;
@@ -1460,6 +1461,9 @@ function buildRouteDecision({ input, metrics }) {
   if (explicitRoute) {
     route = explicitRoute;
     reasonCodes.push("EXPLICIT_ROUTE");
+  } else if (localOnly) {
+    route = "local";
+    reasonCodes.push("LOCAL_MACHINE_STATE");
   } else if (risk === "high" || hasHighRiskWords(goal)) {
     route = "pro";
     reasonCodes.push("HIGH_RISK");
@@ -1490,6 +1494,37 @@ function buildRouteDecision({ input, metrics }) {
     maxCodexChars: 900,
     next: route === "local" ? "do_local" : "task-create"
   };
+}
+
+function isLocalMachineStateTask(goal, scope) {
+  const text = [goal, ...scope].join(" ").toLowerCase();
+  const patterns = [
+    "~/.codex",
+    ".codex/skills",
+    ".codex\\skills",
+    ".codex/config",
+    ".codex\\config",
+    "~/.agents",
+    ".agents/skills",
+    ".agents\\skills",
+    "installed skill",
+    "local skill",
+    "user skill",
+    "skill directory",
+    "mcp config",
+    "codex config",
+    "api-key config",
+    "apikey config",
+    "api key config",
+    "shell profile",
+    "$profile",
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    "home-directory",
+    "home directory"
+  ];
+  return patterns.some((pattern) => text.includes(pattern));
 }
 
 function getMetricGroup(metrics, ...names) {

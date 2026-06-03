@@ -519,6 +519,13 @@ Task ledgers are written under local `.taskmarshal/tasks/` and are gitignored.
 MCP tools return short control packets by default; large task artifacts stay on
 disk unless explicitly inspected.
 
+Keep tasks local to Codex when the relevant evidence is user-specific local
+state outside the repository, such as installed Codex skills, `~/.codex`,
+`~/.agents`, MCP config, provider API-key config, or shell profiles. Workers may
+not share the same permissions. If a worker audit is already running and hits a
+permission boundary, stop or ignore it, state the limitation, and continue from
+local evidence instead of waiting for an independent opinion it cannot produce.
+
 Use `flash` for exploration, routine implementation, and low-risk long
 sessions. Use `pro` only for architecture decisions, tricky debugging,
 security-sensitive changes, uncertain `flash` results, or final verification
