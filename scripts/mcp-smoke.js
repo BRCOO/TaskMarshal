@@ -5,6 +5,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const hideLegacy = process.argv.includes("--hide-legacy");
 const profileArg = process.argv.find((arg) => arg.startsWith("--profile="));
 const profile = profileArg ? profileArg.split("=")[1] : null;
+const ultraMinimalProfile = ["ultra-minimal", "ultra", "tiny", "lean"].includes(String(profile || "").toLowerCase());
+const minimalLikeProfile = profile === "minimal" || ultraMinimalProfile;
 const compactText = process.argv.includes("--compact-text");
 const client = new Client({ name: "taskmarshal-smoke", version: "0.1.0" }, { capabilities: {} });
 const env = {
@@ -23,15 +25,15 @@ const transport = new StdioClientTransport({
 
 await client.connect(transport);
 const tools = await client.listTools();
-const providers = await client.callTool({ name: "worker_list_providers", arguments: {} });
-const metricsReport = await client.callTool({
+const providers = ultraMinimalProfile ? null : await client.callTool({ name: "worker_list_providers", arguments: {} });
+const metricsReport = ultraMinimalProfile ? null : await client.callTool({
   name: "worker_metrics_report",
   arguments: {
     provider: "reasonix",
     limit: 3
   }
 });
-const compactMetricsReport = await client.callTool({
+const compactMetricsReport = ultraMinimalProfile ? null : await client.callTool({
   name: "worker_metrics_report",
   arguments: {
     provider: "reasonix",
@@ -68,7 +70,7 @@ const taskCreate = await client.callTool({
     steps: "plan;verify"
   }
 });
-const proReviewPlan = profile === "minimal" ? null : await client.callTool({
+const proReviewPlan = minimalLikeProfile ? null : await client.callTool({
   name: "worker_plan_pro_review",
   arguments: {
     goal: "Smoke-test pro review planning.",
@@ -89,13 +91,13 @@ const hasWorkerPlanProReview = tools.tools.some((tool) => tool.name === "worker_
 const hasReasonixAlias = tools.tools.some((tool) => tool.name === "reasonix_send_task");
 const hasReasonixSummarizeAlias = tools.tools.some((tool) => tool.name === "reasonix_summarize_session");
 const hasReasonixMetricsAlias = tools.tools.some((tool) => tool.name === "reasonix_metrics_report");
-const providerIds = providers.structuredContent?.data?.providers?.map((provider) => provider.id) ?? [];
-const reasonix = providers.structuredContent?.data?.providers?.find((provider) => provider.id === "reasonix");
+const providerIds = providers?.structuredContent?.data?.providers?.map((provider) => provider.id) ?? [];
+const reasonix = providers?.structuredContent?.data?.providers?.find((provider) => provider.id === "reasonix");
 const reasonixModels = reasonix?.models?.map((model) => model.id) ?? [];
-const metricsData = metricsReport.structuredContent?.data;
-const hasUsableMetricsReport = Boolean(metricsData?.totals)
+const metricsData = metricsReport?.structuredContent?.data;
+const hasUsableMetricsReport = ultraMinimalProfile || (Boolean(metricsData?.totals)
   && Array.isArray(metricsData?.recent)
-  && Array.isArray(metricsData?.guidance);
+  && Array.isArray(metricsData?.guidance));
 const routeData = routeDecision.structuredContent?.data;
 const contextData = contextQuery.structuredContent?.data;
 const contextBackends = ["codegraph", "local-static"];
@@ -169,7 +171,7 @@ const batchFinalize = batchTaskId ? await client.callTool({
 const verifyData = verifyResult?.structuredContent?.data;
 const checkpointData = checkpointTwo?.structuredContent?.data;
 const finalizeData = finalizeResult?.structuredContent?.data;
-const compactMetricsData = compactMetricsReport.structuredContent?.data;
+const compactMetricsData = compactMetricsReport?.structuredContent?.data;
 const batchFinalizeData = batchFinalize?.structuredContent?.data;
 const hasUsableTaskGate = Boolean(taskId)
   && taskData?.artifactRoot
@@ -181,11 +183,11 @@ const hasUsableBatchGate = batchCreate.structuredContent?.data?.action === "batc
   && batchFinalizeData?.action === "batch"
   && batchFinalizeData?.ok === true
   && batchFinalizeData?.results?.at(-1)?.data?.done === true;
-const hasUsableCompactMetrics = compactMetricsData?.compact === true
+const hasUsableCompactMetrics = ultraMinimalProfile || (compactMetricsData?.compact === true
   && Array.isArray(compactMetricsData?.routingHints)
   && compactMetricsData?.recent?.length <= 3
   && compactMetricsData?.metricsScan?.perSessionMetricLimit <= 50
-  && compactMetricsData?.taskVerification?.recent === undefined;
+  && compactMetricsData?.taskVerification?.recent === undefined);
 const proReviewData = proReviewPlan?.structuredContent?.data;
 const compactTextOk = !compactText || routeDecision.content?.[0]?.text?.startsWith("ok ");
 const observeTool = tools.tools.find((tool) => tool.name === "worker_observe");
@@ -195,26 +197,26 @@ const hasUsableProReviewPlan = proReviewData?.provider === "reasonix"
   && proReviewData?.startSession?.model === "pro"
   && typeof proReviewData?.prompt === "string"
   && proReviewData.prompt.includes("second-pass reviewer");
-const expectsLegacyHidden = hideLegacy || profile === "minimal";
+const expectsLegacyHidden = hideLegacy || minimalLikeProfile;
 
 const ok = hasWorkerSendTask
-    && (profile === "minimal" || hasWorkerSummarizeSession)
-    && hasWorkerMetricsReport
+    && (minimalLikeProfile || hasWorkerSummarizeSession)
+    && (ultraMinimalProfile ? !hasWorkerMetricsReport : hasWorkerMetricsReport)
     && hasWorkerContextQuery
     && hasUsableMetricsReport
     && hasUsableContextQuery
     && hasUsableCompactMetrics
     && hasWorkerTaskGate
     && hasUsableRouteDecision
-    && (profile === "minimal" || hasWorkerRouteDecision)
-    && (profile === "minimal" || hasWorkerCreateTask)
-    && (profile === "minimal" || hasWorkerCheckpointStep)
-    && (profile === "minimal" || hasWorkerRecordVerification)
-    && (profile === "minimal" || hasWorkerFinalizeTask)
+    && (minimalLikeProfile || hasWorkerRouteDecision)
+    && (minimalLikeProfile || hasWorkerCreateTask)
+    && (minimalLikeProfile || hasWorkerCheckpointStep)
+    && (minimalLikeProfile || hasWorkerRecordVerification)
+    && (minimalLikeProfile || hasWorkerFinalizeTask)
     && hasUsableTaskGate
     && hasUsableBatchGate
-    && (profile === "minimal" || hasWorkerPlanProReview)
-    && (profile === "minimal" || hasUsableProReviewPlan)
+    && (minimalLikeProfile || hasWorkerPlanProReview)
+    && (minimalLikeProfile || hasUsableProReviewPlan)
     && compactTextOk
     && observeDefaultsToSummary
     && (!expectsLegacyHidden || !hasReasonixAlias)
@@ -223,10 +225,10 @@ const ok = hasWorkerSendTask
     && (expectsLegacyHidden || hasReasonixAlias)
     && (expectsLegacyHidden || hasReasonixSummarizeAlias)
     && (expectsLegacyHidden || hasReasonixMetricsAlias)
-    && providerIds.includes("reasonix")
-    && providerIds.includes("claude-code")
-    && reasonixModels.includes("deepseek-v4-flash")
-    && reasonixModels.includes("deepseek-v4-pro");
+    && (ultraMinimalProfile || providerIds.includes("reasonix"))
+    && (ultraMinimalProfile || providerIds.includes("claude-code"))
+    && (ultraMinimalProfile || reasonixModels.includes("deepseek-v4-flash"))
+    && (ultraMinimalProfile || reasonixModels.includes("deepseek-v4-pro"));
 
 console.log(JSON.stringify({
   ok,
@@ -234,6 +236,7 @@ console.log(JSON.stringify({
   hideLegacy,
   expectsLegacyHidden,
   profile,
+  ultraMinimalProfile,
   compactText,
   compactTextOk,
   observeDefaultsToSummary,

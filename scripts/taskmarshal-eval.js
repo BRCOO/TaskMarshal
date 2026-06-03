@@ -76,6 +76,7 @@ if (existsSync(configPath)) rmSync(configPath, { force: true });
 const configPrint = run(["install-codex-config"]);
 const configWrite = run(["install-codex-config", "--write-user", "--config", configPath, "--server", resolve(process.cwd(), "mcp-server.js")]);
 const configWriteAgain = run(["install-codex-config", "--write-user", "--config", configPath, "--server", resolve(process.cwd(), "mcp-server.js")]);
+const configUltraPrint = run(["install-codex-config", "--profile", "ultra-minimal"]);
 const configText = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
 const configMergePath = resolve(process.cwd(), ".taskmarshal", "eval-codex-config-merge.toml");
 writeFileSync(configMergePath, [
@@ -94,6 +95,9 @@ results.push({
   name: "install codex config",
   passed: configPrint.ok
     && configPrint.data?.snippet?.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\"")
+    && configUltraPrint.ok
+    && configUltraPrint.data?.env?.TASKMARSHAL_TOOL_PROFILE === "ultra-minimal"
+    && configUltraPrint.data?.snippet?.includes("TASKMARSHAL_TOOL_PROFILE = \"ultra-minimal\"")
     && configWrite.ok
     && configWrite.data?.changed === true
     && configWriteAgain.ok
@@ -107,8 +111,8 @@ results.push({
     && configMergeText.includes("EXISTING_FLAG = \"keep\"")
     && configMergeText.includes("TASKMARSHAL_TOOL_PROFILE = \"minimal\"")
     && configMergeText.includes("TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS = \"1200\""),
-  data: { print: configPrint.data, write: configWrite.data, writeAgain: configWriteAgain.data, merge: configMerge.data },
-  error: configPrint.error || configWrite.error || configWriteAgain.error || configMerge.error
+  data: { print: configPrint.data, ultraPrint: configUltraPrint.data, write: configWrite.data, writeAgain: configWriteAgain.data, merge: configMerge.data },
+  error: configPrint.error || configUltraPrint.error || configWrite.error || configWriteAgain.error || configMerge.error
 });
 
 const task = run(["task-create", "--goal", "eval token firewall", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "plan;verify"]);

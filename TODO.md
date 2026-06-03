@@ -56,6 +56,11 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add `TASKMARSHAL_TOOL_PROFILE=minimal`.
   - Acceptance: token-sensitive installations can expose only core provider
     controls and the merged task gate.
+- [x] Add `TASKMARSHAL_TOOL_PROFILE=ultra-minimal`.
+  - Acceptance: token-sensitive installations can hide provider listing,
+    direct metrics, one-shot ask, compatibility aliases, and separate gate
+    helpers while keeping context query, persistent worker controls,
+    observation, approvals, stop, and the merged task gate.
 - [x] Add `TASKMARSHAL_COMPACT_TOOL_TEXT=1`.
   - Acceptance: MCP `structuredContent` remains full while visible tool text is
     reduced to a one-line summary.
@@ -123,3 +128,23 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add a local eval suite.
   - Acceptance: `npm run eval` verifies representative local/flash/pro routing
     and task-gate finalization.
+- [x] Add token-saving benchmarks.
+  - Acceptance: `npm run eval:tokens` compares standard, minimal, and
+    ultra-minimal MCP tool-list size plus compact observe and compact metrics
+    payload sizes.
+- [x] Add output-contract and verification guidance to metrics.
+  - Acceptance: compact metrics can flag missing output contracts and unknown
+    verification records before routing quality silently degrades.
+
+## P5 - Next Optimizations
+
+- [ ] Add profile-specific short schemas for ultra-minimal tools.
+  - Acceptance: ultra-minimal keeps the same eight tools but reduces tool-list
+    schema text further without changing behavior.
+- [ ] Add real-run Codex A/B samples.
+  - Acceptance: `npm run eval:codex-ab -- --input ...` uses actual task
+    records to compare Codex-only vs TaskMarshal vs TaskMarshal+CodeGraph
+    quality and total Codex input/output tokens.
+- [ ] Add stale CodeGraph index warnings to routing output.
+  - Acceptance: route/context packets can warn when repo context quality is
+    likely stale without requiring Codex to inspect `.codegraph/`.

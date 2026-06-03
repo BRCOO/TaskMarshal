@@ -112,7 +112,7 @@ function installCodexConfig(args) {
   const serverPath = opts.server
     ? resolve(opts.server)
     : THIS_FILE.replace(/[\\/]taskmarshalctl\.js$/, `${process.platform === "win32" ? "\\" : "/"}mcp-server.js`);
-  const snippet = buildCodexMcpTomlSnippet({ name: serverName, serverPath });
+  const snippet = buildCodexMcpTomlSnippet({ name: serverName, serverPath, profile: opts.profile });
 
   if (!opts.writeUser) {
     output({
@@ -121,14 +121,14 @@ function installCodexConfig(args) {
       configPath,
       serverName,
       serverPath,
-      env: codexMcpEnv(),
+      env: codexMcpEnv({ profile: opts.profile }),
       snippet,
       next: `Run with --write-user to update ${configPath}. Restart Codex after changing MCP config.`
     });
     return;
   }
 
-  const result = writeCodexMcpConfig({ configPath, name: serverName, serverPath });
+  const result = writeCodexMcpConfig({ configPath, name: serverName, serverPath, profile: opts.profile });
   output({
     ok: true,
     mode: "write",
@@ -136,7 +136,7 @@ function installCodexConfig(args) {
     backupPath: result.backupPath,
     serverName,
     serverPath,
-    env: codexMcpEnv(),
+    env: codexMcpEnv({ profile: opts.profile }),
     changed: result.changed,
     next: "Restart Codex or open a fresh thread for MCP config changes to take effect."
   });
@@ -871,7 +871,8 @@ function parseInstallCodexConfigArgs(args) {
     writeUser: false,
     config: null,
     server: null,
-    name: "taskmarshal-mcp"
+    name: "taskmarshal-mcp",
+    profile: "minimal"
   };
   for (let i = 0; i < args.length; i += 1) {
     const item = args[i];
@@ -879,6 +880,7 @@ function parseInstallCodexConfigArgs(args) {
     else if (item === "--config") out.config = args[++i];
     else if (item === "--server") out.server = args[++i];
     else if (item === "--name") out.name = args[++i];
+    else if (item === "--profile") out.profile = normalizeToolProfileArg(args[++i]);
     else throw new Error(`Unknown install-codex-config option: ${item}`);
   }
   if (!/^[A-Za-z0-9_.-]+$/.test(out.name)) throw new Error("--name must contain only letters, digits, dot, underscore, or dash");
@@ -1006,7 +1008,7 @@ function help() {
 Usage:
   taskmarshalctl doctor
   taskmarshalctl models
-  taskmarshalctl install-codex-config [--write-user] [--config PATH] [--server PATH] [--name taskmarshal-mcp]
+  taskmarshalctl install-codex-config [--write-user] [--config PATH] [--server PATH] [--name taskmarshal-mcp] [--profile minimal|ultra-minimal|standard|full]
   taskmarshalctl ask "prompt" [--dir PATH] [--approve cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro] [--output-max-chars N] [--no-output-contract] [--yolo]
   taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N] [--dir PATH] [--backend auto|codegraph|local-static]
   taskmarshalctl metrics [--limit N] [--provider NAME] [--model MODEL] [--since ISO_DATE] [--compact]
@@ -1034,7 +1036,7 @@ Notes:
   start creates a persistent local daemon backed by reasonix acp.
   observe defaults to summary mode; pass --mode events only when raw event tails are needed.
   worker output contract is default-on: final worker text is capped at ${DEFAULT_WORKER_OUTPUT_MAX_CHARS} chars unless disabled.
-  install-codex-config prints a minimal+compact Codex MCP config by default; --write-user updates ~/.codex/config.toml with a backup.
+  install-codex-config prints a minimal+compact Codex MCP config by default; use --profile ultra-minimal for the smallest tool list.
 `);
 }
 
@@ -1069,16 +1071,16 @@ function readJsonOptional(path) {
   }
 }
 
-function codexMcpEnv() {
+function codexMcpEnv({ profile = "minimal" } = {}) {
   return {
-    TASKMARSHAL_TOOL_PROFILE: "minimal",
+    TASKMARSHAL_TOOL_PROFILE: profile,
     TASKMARSHAL_COMPACT_TOOL_TEXT: "1",
     TASKMARSHAL_WORKER_OUTPUT_CONTRACT: "1",
     TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS: String(DEFAULT_WORKER_OUTPUT_MAX_CHARS)
   };
 }
 
-function buildCodexMcpTomlSnippet({ name, serverPath }) {
+function buildCodexMcpTomlSnippet({ name, serverPath, profile = "minimal" }) {
   if (serverPath.includes("'")) throw new Error("server path cannot contain single quotes for TOML literal args");
   return [
     `[mcp_servers.${name}]`,
@@ -1086,7 +1088,7 @@ function buildCodexMcpTomlSnippet({ name, serverPath }) {
     `args = ['${serverPath}']`,
     ``,
     `[mcp_servers.${name}.env]`,
-    `TASKMARSHAL_TOOL_PROFILE = "minimal"`,
+    `TASKMARSHAL_TOOL_PROFILE = "${profile}"`,
     `TASKMARSHAL_COMPACT_TOOL_TEXT = "1"`,
     `TASKMARSHAL_WORKER_OUTPUT_CONTRACT = "1"`,
     `TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS = "${DEFAULT_WORKER_OUTPUT_MAX_CHARS}"`,
@@ -1094,7 +1096,7 @@ function buildCodexMcpTomlSnippet({ name, serverPath }) {
   ].join("\n");
 }
 
-function writeCodexMcpConfig({ configPath, name, serverPath }) {
+function writeCodexMcpConfig({ configPath, name, serverPath, profile = "minimal" }) {
   if (serverPath.includes("'")) throw new Error("server path cannot contain single quotes for TOML literal args");
   const existing = existsSync(configPath) ? readFileSync(configPath, "utf8").replace(/^\uFEFF/, "") : "";
   const next = upsertTomlKeyValues(
@@ -1104,7 +1106,7 @@ function writeCodexMcpConfig({ configPath, name, serverPath }) {
     }),
     `mcp_servers.${name}.env`,
     {
-      TASKMARSHAL_TOOL_PROFILE: `"minimal"`,
+      TASKMARSHAL_TOOL_PROFILE: `"${profile}"`,
       TASKMARSHAL_COMPACT_TOOL_TEXT: `"1"`,
       TASKMARSHAL_WORKER_OUTPUT_CONTRACT: `"1"`,
       TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS: `"${DEFAULT_WORKER_OUTPUT_MAX_CHARS}"`
@@ -1120,6 +1122,13 @@ function writeCodexMcpConfig({ configPath, name, serverPath }) {
   }
   writeFileSync(configPath, next, "utf8");
   return { changed: true, backupPath };
+}
+
+function normalizeToolProfileArg(value) {
+  const profile = String(value || "").trim().toLowerCase();
+  if (["ultra", "tiny", "lean"].includes(profile)) return "ultra-minimal";
+  if (["ultra-minimal", "minimal", "standard", "full"].includes(profile)) return profile;
+  throw new Error("--profile must be one of: minimal, ultra-minimal, standard, full");
 }
 
 function upsertTomlKeyValues(existing, sectionName, values) {
@@ -1322,13 +1331,24 @@ function buildMetricsGuidance(totals) {
     guidance.push("No persistent-session metrics found yet. Run persistent worker sessions to collect small metrics records.");
     return guidance;
   }
+  const outputContractCoverage = totals.turnCount
+    ? (totals.outputContractAppliedCount || 0) / totals.turnCount
+    : 0;
+  const unknownVerificationRate = totals.turnCount
+    ? (totals.unknownVerificationCount || 0) / totals.turnCount
+    : 0;
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
     guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
+  }
+  if (outputContractCoverage < 0.9) {
+    guidance.push("Some recent turns missed the worker output contract; restart the MCP/session with TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1 and pass task ids on worker_send_task.");
   }
   if (totals.avgAssistantRawChars && totals.avgAssistantChars && totals.avgAssistantRawChars > totals.avgAssistantChars * 2) {
     guidance.push("Output contract is reducing worker final text; inspect raw logs only when debugging worker quality.");
   }
-  if (totals.unknownVerificationCount > 0) {
+  if (unknownVerificationRate > 0.25) {
+    guidance.push("Many turns still have unknown verification; use worker_task_gate(action:'verify') or pass session+turnId when recording checks.");
+  } else if (totals.unknownVerificationCount > 0) {
     guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
   }
   if (totals.permissionRequests > 0 && totals.autoPermissions === totals.permissionRequests) {
@@ -1342,8 +1362,12 @@ function buildRoutingHints({ totals, taskVerification }) {
   const hints = [];
   const failCount = taskVerification.byStatus.fail || 0;
   const passCount = taskVerification.byStatus.pass || 0;
+  const outputContractCoverage = totals.turnCount
+    ? (totals.outputContractAppliedCount || 0) / totals.turnCount
+    : 1;
   if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (outputContractCoverage < 0.9) hints.push("enforce_output_contract");
   if (totals.outputContractTruncatedCount > 0) hints.push("review_worker_compactness");
   if (totals.unknownVerificationCount > 0) hints.push("record_verification");
   if (!hints.length) hints.push("static_route_ok");

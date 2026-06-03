@@ -10,6 +10,7 @@ const SESSION_DIR = resolve(homedir(), ".reasonixctl", "sessions", SESSION_ID);
 const APPROX_CHARS_PER_TOKEN = 4;
 const BUDGETS = {
   minimalToolListChars: 10500,
+  ultraMinimalToolListChars: 8500,
   compactContextStructuredChars: 1400,
   observeSummaryStructuredChars: 900,
   observeFinalStructuredChars: 800,
@@ -29,6 +30,17 @@ const standard = await withMcp({}, async (client) => {
 
 const minimal = await withMcp({
   TASKMARSHAL_TOOL_PROFILE: "minimal",
+  TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
+}, async (client) => {
+  const tools = await client.listTools();
+  return {
+    toolCount: tools.tools.length,
+    toolList: measure(tools)
+  };
+});
+
+const ultraMinimal = await withMcp({
+  TASKMARSHAL_TOOL_PROFILE: "ultra-minimal",
   TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
 }, async (client) => {
   const tools = await client.listTools();
@@ -101,14 +113,20 @@ cleanupSyntheticReasonixSession();
 
 const comparisons = {
   toolListChars: compareChars(standard.toolList.chars, minimal.toolList.chars),
+  ultraToolListChars: compareChars(minimal.toolList.chars, ultraMinimal.toolList.chars),
+  standardToUltraToolListChars: compareChars(standard.toolList.chars, ultraMinimal.toolList.chars),
   toolCount: compareCount(standard.toolCount, minimal.toolCount),
+  ultraToolCount: compareCount(minimal.toolCount, ultraMinimal.toolCount),
+  standardToUltraToolCount: compareCount(standard.toolCount, ultraMinimal.toolCount),
   observeSummaryChars: compareChars(observe.events.structuredChars, observe.summary.structuredChars),
   observeFinalChars: compareChars(observe.events.structuredChars, observe.final.structuredChars),
   metricsCompactChars: compareChars(metrics.normal.structuredChars, metrics.compact.structuredChars)
 };
 
 const ok = comparisons.toolListChars.savedChars > 0
+  && comparisons.ultraToolListChars.savedChars > 0
   && comparisons.toolCount.saved > 0
+  && comparisons.ultraToolCount.saved > 0
   && comparisons.observeSummaryChars.savedChars > 0
   && comparisons.observeFinalChars.savedChars > 0
   && comparisons.metricsCompactChars.savedChars > 0
@@ -123,9 +141,14 @@ console.log(JSON.stringify({
     tools: {
       standard,
       minimal,
+      ultraMinimal,
       savings: {
-        count: comparisons.toolCount,
-        text: comparisons.toolListChars
+        standardToMinimalCount: comparisons.toolCount,
+        minimalToUltraCount: comparisons.ultraToolCount,
+        standardToUltraCount: comparisons.standardToUltraToolCount,
+        standardToMinimalText: comparisons.toolListChars,
+        minimalToUltraText: comparisons.ultraToolListChars,
+        standardToUltraText: comparisons.standardToUltraToolListChars
       }
     },
     context,
@@ -196,6 +219,7 @@ function compareCount(before, after) {
 
 function withinBudgets() {
   return minimal.toolList.chars <= BUDGETS.minimalToolListChars
+    && ultraMinimal.toolList.chars <= BUDGETS.ultraMinimalToolListChars
     && context.query.structuredChars <= BUDGETS.compactContextStructuredChars
     && observe.summary.structuredChars <= BUDGETS.observeSummaryStructuredChars
     && observe.final.structuredChars <= BUDGETS.observeFinalStructuredChars
@@ -205,6 +229,7 @@ function withinBudgets() {
 function budgetReport() {
   return {
     minimalToolListChars: budgetItem(minimal.toolList.chars, BUDGETS.minimalToolListChars),
+    ultraMinimalToolListChars: budgetItem(ultraMinimal.toolList.chars, BUDGETS.ultraMinimalToolListChars),
     compactContextStructuredChars: budgetItem(context.query.structuredChars, BUDGETS.compactContextStructuredChars),
     observeSummaryStructuredChars: budgetItem(observe.summary.structuredChars, BUDGETS.observeSummaryStructuredChars),
     observeFinalStructuredChars: budgetItem(observe.final.structuredChars, BUDGETS.observeFinalStructuredChars),

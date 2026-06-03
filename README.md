@@ -60,7 +60,7 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Token-firewall task gates with short control packets and task keys
 - Merged `worker_task_gate` for route/create/checkpoint/verify/finalize control
 - Batch task gate calls for fewer MCP round trips
-- Minimal MCP tool profile and compact tool text mode for lower Codex context use
+- Minimal and ultra-minimal MCP tool profiles plus compact tool text mode
 - Incremental observation cursors and compact metrics reports
 - Tail-limited metrics scans for lower filesystem and context overhead
 - Default worker output contract with 1200-character final-output cap
@@ -126,6 +126,16 @@ This writes a `taskmarshal-mcp` server entry to `~/.codex/config.toml` with
 contract with `TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1` and
 `TASKMARSHAL_WORKER_OUTPUT_MAX_CHARS=1200`. Restart Codex after changing MCP
 config.
+
+For the smallest MCP tool list, use:
+
+```bash
+node taskmarshalctl.js install-codex-config --write-user --profile ultra-minimal
+```
+
+`ultra-minimal` keeps the active orchestration path, including
+`worker_context_query`, persistent session controls, observation,
+approval/denial, stop, and the merged `worker_task_gate`.
 
 Manual registration is also supported.
 
@@ -268,10 +278,10 @@ npm run eval:quality
 npm run eval:codex-ab
 ```
 
-The benchmark compares standard vs minimal MCP tool-list size, event observation
-vs summary/final observation size, and normal vs compact metrics output. It
-reports exact character counts plus an approximate token estimate, and fails if
-compact paths exceed fixed budgets.
+The benchmark compares standard, minimal, and ultra-minimal MCP tool-list size,
+event observation vs summary/final observation size, and normal vs compact
+metrics output. It reports exact character counts plus an approximate token
+estimate, and fails if compact paths exceed fixed budgets.
 
 The quality benchmark uses deterministic local fixtures to exercise the same
 compact metrics path used by routing. It checks worker success rate, task
@@ -405,8 +415,8 @@ Set `TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS=1` before launching
 `taskmarshal-mcp` to hide the `reasonix_*` compatibility tools and reduce the
 MCP tool list. The provider-neutral `worker_*` tools remain available.
 
-For the smallest Codex tool-list and tool-result footprint, launch the MCP
-server with:
+For a small Codex tool-list and tool-result footprint, launch the MCP server
+with:
 
 ```bash
 TASKMARSHAL_TOOL_PROFILE=minimal
@@ -418,10 +428,25 @@ legacy Reasonix aliases automatically. `TASKMARSHAL_COMPACT_TOOL_TEXT=1` keeps
 full `structuredContent` for clients, but reduces the visible text result to a
 one-line control summary.
 
+For the smallest practical tool list, use:
+
+```bash
+TASKMARSHAL_TOOL_PROFILE=ultra-minimal
+TASKMARSHAL_COMPACT_TOOL_TEXT=1
+```
+
+`ultra-minimal` exposes only `worker_context_query`, `worker_start_session`,
+`worker_send_task`, `worker_observe`, `worker_task_gate`, `worker_approve`,
+`worker_deny`, and `worker_stop`. Routing still uses compact metrics internally
+through `worker_task_gate(action: "route")`, but direct provider listing,
+doctor, metrics, one-shot ask, compatibility aliases, and separate gate helper
+tools are hidden to reduce Codex input tokens.
+
 To install that setup into Codex user config:
 
 ```bash
 node taskmarshalctl.js install-codex-config --write-user
+node taskmarshalctl.js install-codex-config --write-user --profile ultra-minimal
 ```
 
 By default, `install-codex-config` only prints the TOML snippet. With
@@ -596,14 +621,14 @@ The grep may match documentation or source identifiers. Review matches before co
 
 ```text
 .
-├── mcp-server.js                 # TaskMarshal MCP server
-├── taskmarshalctl.js             # Provider-neutral TaskMarshal CLI
-├── reasonixctl.js                # Compatibility shim
-├── lib/acp-client.js             # ACP JSON-RPC client
-├── skills/taskmarshal/           # Codex Skill
-├── scripts/mcp-smoke.js          # MCP smoke test
-├── scripts/taskmarshal-eval.js   # Local routing and task-gate evals
-└── examples/                     # Example config and worker prompt
+|-- mcp-server.js                 # TaskMarshal MCP server
+|-- taskmarshalctl.js             # Provider-neutral TaskMarshal CLI
+|-- reasonixctl.js                # Compatibility shim
+|-- lib/acp-client.js             # ACP JSON-RPC client
+|-- skills/taskmarshal/           # Codex Skill
+|-- scripts/mcp-smoke.js          # MCP smoke test
+|-- scripts/taskmarshal-eval.js   # Local routing and task-gate evals
+`-- examples/                     # Example config and worker prompt
 ```
 
 ## Roadmap

@@ -23,7 +23,8 @@ const CLAUDE_SESSION_DIR = resolve(STATE_DIR, "providers", "claude-code", "sessi
 const CLAUDE_COMMAND = process.platform === "win32" ? "cmd.exe" : "claude";
 const CLAUDE_PREFIX_ARGS = process.platform === "win32" ? ["/d", "/s", "/c", "claude"] : [];
 const TOOL_PROFILE = normalizeToolProfile(process.env.TASKMARSHAL_TOOL_PROFILE);
-const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS) || TOOL_PROFILE === "minimal";
+const HIDE_LEGACY_REASONIX_TOOLS = truthyEnv(process.env.TASKMARSHAL_HIDE_LEGACY_REASONIX_TOOLS)
+  || ["minimal", "ultra-minimal"].includes(TOOL_PROFILE);
 const COMPACT_TOOL_TEXT = truthyEnv(process.env.TASKMARSHAL_COMPACT_TOOL_TEXT);
 const Provider = z.enum(["reasonix", "claude-code"]);
 const ApproveMode = z.enum(["manual", "cancel", "once", "always", "reject"]);
@@ -105,7 +106,7 @@ if (!HIDE_LEGACY_REASONIX_TOOLS) registerReasonixCompatTools();
 
 function registerWorkerTools() {
   const enabled = (name) => toolEnabled(name);
-  server.registerTool("worker_list_providers", {
+  if (enabled("worker_list_providers")) server.registerTool("worker_list_providers", {
     title: "TaskMarshal List Providers",
     description: "List local CLI coding-agent providers available to TaskMarshal.",
     annotations: readOnlyAnnotations()
@@ -125,12 +126,12 @@ function registerWorkerTools() {
 
   if (enabled("worker_context_query")) server.registerTool("worker_context_query", {
     title: "TaskMarshal Context Query",
-    description: "Return a compact repo context packet for a task goal.",
+    description: "Return compact repo context for a task.",
     inputSchema: {
       goal: z.string().min(1).describe("Task goal."),
-      scope: z.string().default("").describe("Files or modules."),
-      dir: z.string().optional().describe("Repository directory."),
-      maxChars: z.number().int().min(500).max(6000).default(1200).describe("Maximum packet size.")
+      scope: z.string().default("").describe("Files/modules."),
+      dir: z.string().optional().describe("Repo directory."),
+      maxChars: z.number().int().min(500).max(6000).default(1200).describe("Max packet chars.")
     },
     annotations: readOnlyAnnotations()
   }, async ({ goal, scope, dir, maxChars }) => {
@@ -167,18 +168,18 @@ function registerWorkerTools() {
     "claude-code": () => claudeAsk({ prompt, dir, approve, model, budget, yolo })
   }));
 
-  server.registerTool("worker_start_session", {
+  if (enabled("worker_start_session")) server.registerTool("worker_start_session", {
     title: "TaskMarshal Start Worker Session",
-    description: "Start a persistent worker session. Use approve='manual' when Codex should gate tool permissions.",
+    description: "Start a persistent worker session.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to use."),
       id: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional().describe("Optional stable session id."),
-      dir: z.string().optional().describe("Working directory for the worker. Defaults to the MCP server directory."),
-      approve: ApproveMode.default("manual").describe("Permission policy. 'manual' pauses until worker_approve or worker_deny."),
-      model: z.string().optional().describe("Optional provider model override. For Reasonix, accepts flash/pro aliases or full ids: deepseek-v4-flash, deepseek-v4-pro."),
-      preset: z.string().optional().describe("Optional provider preset override."),
-      budget: z.string().optional().describe("Optional provider budget override."),
-      yolo: z.boolean().default(false).describe("Pass provider-specific all-permissions mode. Use only for fully trusted tasks.")
+      dir: z.string().optional().describe("Worker cwd."),
+      approve: ApproveMode.default("manual").describe("Permission policy."),
+      model: z.string().optional().describe("Model override. Reasonix accepts flash/pro aliases."),
+      preset: z.string().optional().describe("Preset override."),
+      budget: z.string().optional().describe("Budget override."),
+      yolo: z.boolean().default(false).describe("Provider all-permissions mode.")
     },
     annotations: actionAnnotations({ openWorld: true })
   }, async ({ provider, id, dir, approve, model, preset, budget, yolo }) => routeProvider(provider, {
@@ -220,14 +221,14 @@ function registerWorkerTools() {
     "claude-code": () => claudeStatus(id)
   }));
 
-  server.registerTool("worker_send_task", {
+  if (enabled("worker_send_task")) server.registerTool("worker_send_task", {
     title: "TaskMarshal Send Task",
     description: "Send a bounded task to a worker session.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to use."),
       id: z.string().min(1).describe("Worker session id."),
       prompt: z.string().min(1).describe("Task prompt for the worker."),
-      taskId: z.string().optional().describe("Optional TaskMarshal task id to attach to this worker turn's metrics.")
+      taskId: z.string().optional().describe("Task id for metrics.")
     },
     annotations: actionAnnotations({ openWorld: true })
   }, async ({ provider, id, prompt, taskId }) => routeProvider(provider, {
@@ -240,16 +241,16 @@ function registerWorkerTools() {
     "claude-code": () => claudeSendTask({ id, prompt, taskId })
   }));
 
-  server.registerTool("worker_observe", {
+  if (enabled("worker_observe")) server.registerTool("worker_observe", {
     title: "TaskMarshal Observe Worker",
     description: "Read compact worker session state.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to inspect."),
       id: z.string().min(1).describe("Worker session id."),
-      tail: z.number().int().min(1).max(400).default(80).describe("Number of event records to return in events mode."),
-      mode: ObserveMode.default("summary").describe("Observation mode: summary, final, permission, or events."),
-      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Approximate maximum characters for large text fields."),
-      since: z.number().int().min(0).default(0).describe("Optional event cursor from a previous observe call.")
+      tail: z.number().int().min(1).max(400).default(80).describe("Event tail count."),
+      mode: ObserveMode.default("summary").describe("summary, final, permission, or events."),
+      maxChars: z.number().int().min(500).max(50000).default(12000).describe("Max large-field chars."),
+      since: z.number().int().min(0).default(0).describe("Event cursor.")
     },
     annotations: readOnlyAnnotations()
   }, async ({ provider, id, tail, mode, maxChars, since }) => routeProvider(provider, {
@@ -271,7 +272,7 @@ function registerWorkerTools() {
     "claude-code": () => claudeSummarizeSession({ id, maxChars })
   }));
 
-  server.registerTool("worker_metrics_report", {
+  if (enabled("worker_metrics_report")) server.registerTool("worker_metrics_report", {
     title: "TaskMarshal Metrics Report",
     description: "Return compact worker metrics.",
     inputSchema: {
@@ -294,24 +295,24 @@ function registerWorkerTools() {
     "claude-code": () => claudeMetricsReport({ limit, model, since, maxSessions, compact })
   }));
 
-  server.registerTool("worker_task_gate", {
+  if (enabled("worker_task_gate")) server.registerTool("worker_task_gate", {
     title: "TaskMarshal Task Gate",
     description: "Route, create, checkpoint, verify, or finalize a task.",
     inputSchema: {
       action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).default("route").describe("Gate action."),
       goal: z.string().default("").describe("Short task goal for route/create."),
-      scope: z.string().default("").describe("Comma-separated files or modules."),
+      scope: z.string().default("").describe("Files/modules."),
       risk: RouteRisk.default("medium").describe("Risk level."),
-      files: z.number().int().min(0).max(200).default(0).describe("Approximate file count for route."),
+      files: z.number().int().min(0).max(200).default(0).describe("File count for route."),
       route: z.enum(["local", "flash", "pro"]).optional().describe("Optional explicit route."),
-      steps: z.string().default("").describe("Optional semicolon-separated short steps for create."),
+      steps: z.string().default("").describe("Semicolon-separated steps."),
       id: z.string().default("").describe("Task id for checkpoint/verify/finalize."),
       step: z.string().default("").describe("Step id for checkpoint."),
       status: VerificationStatus.optional().describe("Verification status for verify."),
       command: z.string().default("").describe("Verification command for verify."),
       exitCode: z.number().int().optional().describe("Command exit code for verify."),
-      session: z.string().default("").describe("Optional worker session id for direct metric patching; requires turnId."),
-      turnId: z.string().default("").describe("Worker turn id to mark as verified when session is provided."),
+      session: z.string().default("").describe("Session id for metric patching."),
+      turnId: z.string().default("").describe("Turn id for metric patching."),
       note: z.string().default("").describe("Short note."),
       batch: z.array(z.object({
         action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]),
@@ -329,7 +330,7 @@ function registerWorkerTools() {
         session: z.string().optional(),
         turnId: z.string().optional(),
         note: z.string().optional()
-      })).max(8).optional().describe("Optional ordered batch of gate actions.")
+      })).max(8).optional().describe("Ordered gate actions.")
     },
     annotations: readOnlyAnnotations()
   }, async (input) => toolResult(await runTaskGate(input)));
@@ -444,9 +445,9 @@ function registerWorkerTools() {
     prompt: buildProReviewPrompt({ goal, risk, scope, acceptance, verification })
   })));
 
-  server.registerTool("worker_approve", {
+  if (enabled("worker_approve")) server.registerTool("worker_approve", {
     title: "TaskMarshal Approve Permission",
-    description: "Approve the currently pending permission request in a manual worker session.",
+    description: "Approve a pending worker permission request.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to control."),
       id: z.string().min(1).describe("Worker session id.")
@@ -457,9 +458,9 @@ function registerWorkerTools() {
     "claude-code": () => claudeUnsupported("external permission approval", id)
   }));
 
-  server.registerTool("worker_deny", {
+  if (enabled("worker_deny")) server.registerTool("worker_deny", {
     title: "TaskMarshal Deny Permission",
-    description: "Deny the currently pending permission request in a manual worker session.",
+    description: "Deny a pending worker permission request.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to control."),
       id: z.string().min(1).describe("Worker session id.")
@@ -483,9 +484,9 @@ function registerWorkerTools() {
     "claude-code": () => claudeUnsupported("external turn cancellation", id)
   }));
 
-  server.registerTool("worker_stop", {
+  if (enabled("worker_stop")) server.registerTool("worker_stop", {
     title: "TaskMarshal Stop Worker Session",
-    description: "Stop a persistent worker session daemon.",
+    description: "Stop a worker session daemon.",
     inputSchema: {
       provider: Provider.default("reasonix").describe("Worker provider to control."),
       id: z.string().min(1).describe("Worker session id.")
@@ -1468,13 +1469,24 @@ function buildMetricsGuidance(totals) {
     guidance.push("No metrics found yet. Run persistent worker sessions and summarize them before tuning routing.");
     return guidance;
   }
+  const outputContractCoverage = totals.turnCount
+    ? (totals.outputContractAppliedCount || 0) / totals.turnCount
+    : 0;
+  const unknownVerificationRate = totals.turnCount
+    ? (totals.unknownVerificationCount || 0) / totals.turnCount
+    : 0;
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) {
     guidance.push("Average worker output is large; tighten yield-summary budgets and prefer worker_observe summary/final modes.");
+  }
+  if (outputContractCoverage < 0.9) {
+    guidance.push("Some recent turns missed the worker output contract; restart the MCP/session with TASKMARSHAL_WORKER_OUTPUT_CONTRACT=1 and pass task ids on worker_send_task.");
   }
   if (totals.avgAssistantRawChars && totals.avgAssistantChars && totals.avgAssistantRawChars > totals.avgAssistantChars * 2) {
     guidance.push("Output contract is reducing worker final text; inspect raw logs only when debugging worker quality.");
   }
-  if (totals.unknownVerificationCount > 0) {
+  if (unknownVerificationRate > 0.25) {
+    guidance.push("Many turns still have unknown verification; use worker_task_gate(action:'verify') or pass session+turnId when recording checks.");
+  } else if (totals.unknownVerificationCount > 0) {
     guidance.push("Verification is still unknown for some turns; record pass/fail/skip to make routing decisions evidence-based.");
   }
   if (totals.permissionRequests > 0 && totals.autoPermissions === totals.permissionRequests) {
@@ -1488,8 +1500,12 @@ function buildRoutingHints({ totals, taskVerification }) {
   const hints = [];
   const failCount = taskVerification.byStatus?.fail || 0;
   const passCount = taskVerification.byStatus?.pass || 0;
+  const outputContractCoverage = totals.turnCount
+    ? (totals.outputContractAppliedCount || 0) / totals.turnCount
+    : 1;
   if (failCount > 0 && failCount >= passCount) hints.push("tighten_scope_or_upgrade_model");
   if (totals.avgAssistantChars && totals.avgAssistantChars > 8000) hints.push("tighten_worker_yield");
+  if (outputContractCoverage < 0.9) hints.push("enforce_output_contract");
   if (totals.outputContractTruncatedCount > 0) hints.push("review_worker_compactness");
   if (totals.unknownVerificationCount > 0) hints.push("record_verification");
   if (!hints.length) hints.push("static_route_ok");
@@ -1603,13 +1619,28 @@ function isFalseEnv(value) {
 function normalizeToolProfile(value) {
   const profile = String(value || "standard").trim().toLowerCase();
   if (profile === "admin") return "full";
-  if (["minimal", "standard", "full"].includes(profile)) return profile;
+  if (["ultra", "tiny", "lean"].includes(profile)) return "ultra-minimal";
+  if (["ultra-minimal", "minimal", "standard", "full"].includes(profile)) return profile;
   return "standard";
 }
 
 function toolEnabled(name) {
   if (TOOL_PROFILE === "full" || TOOL_PROFILE === "standard") return true;
+  if (TOOL_PROFILE === "ultra-minimal") {
+    const ultraMinimal = new Set([
+      "worker_context_query",
+      "worker_start_session",
+      "worker_send_task",
+      "worker_observe",
+      "worker_task_gate",
+      "worker_approve",
+      "worker_deny",
+      "worker_stop"
+    ]);
+    return ultraMinimal.has(name);
+  }
   const minimal = new Set([
+    "worker_list_providers",
     "worker_doctor",
     "worker_context_query",
     "worker_start_session",
