@@ -63,6 +63,7 @@ const taskCreate = await client.callTool({
   name: "worker_task_gate",
   arguments: {
     action: "create",
+    id: "tm-smoke-token-firewall",
     goal: "Smoke-test token firewall.",
     scope: "taskmarshalctl.js,mcp-server.js",
     risk: "low",
@@ -147,6 +148,7 @@ const batchCreate = await client.callTool({
     batch: [
       {
         action: "create",
+        id: "tm-smoke-batch-task-gate",
         goal: "Smoke-test batch task gate.",
         scope: "taskmarshalctl.js",
         risk: "low",
@@ -168,11 +170,40 @@ const batchFinalize = batchTaskId ? await client.callTool({
     ]
   }
 }) : null;
+const readonlyCreate = await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    action: "create",
+    id: "tm-smoke-readonly-close",
+    goal: "Smoke-test read-only close helper.",
+    scope: "taskmarshalctl.js",
+    risk: "low",
+    route: "flash",
+    steps: "inspect;report"
+  }
+});
+const readonlyTaskId = readonlyCreate.structuredContent?.data?.taskId;
+const closeReadonly = readonlyTaskId ? await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    action: "close-readonly",
+    id: readonlyTaskId,
+    status: "pass",
+    command: "read-only smoke",
+    note: "smoke"
+  }
+}) : null;
+const taskReport = await client.callTool({
+  name: "worker_task_gate",
+  arguments: { action: "tasks" }
+});
 const verifyData = verifyResult?.structuredContent?.data;
 const checkpointData = checkpointTwo?.structuredContent?.data;
 const finalizeData = finalizeResult?.structuredContent?.data;
 const compactMetricsData = compactMetricsReport?.structuredContent?.data;
 const batchFinalizeData = batchFinalize?.structuredContent?.data;
+const closeReadonlyData = closeReadonly?.structuredContent?.data;
+const taskReportData = taskReport?.structuredContent?.data;
 const hasUsableTaskGate = Boolean(taskId)
   && taskData?.artifactRoot
   && checkpointData?.completed === 2
@@ -183,6 +214,17 @@ const hasUsableBatchGate = batchCreate.structuredContent?.data?.action === "batc
   && batchFinalizeData?.action === "batch"
   && batchFinalizeData?.ok === true
   && batchFinalizeData?.results?.at(-1)?.data?.done === true;
+const hasUsableCloseReadonly = closeReadonlyData?.action === "close-readonly"
+  && closeReadonlyData?.done === true
+  && closeReadonlyData?.completed === closeReadonlyData?.totalSteps
+  && typeof closeReadonlyData?.taskKey === "string";
+const hasUsableTaskReport = taskReportData?.action === "tasks"
+  && taskReportData?.compact === true
+  && Number.isInteger(taskReportData?.totals?.taskCount)
+  && Number.isInteger(taskReportData?.totals?.openOrBlockedCount)
+  && Array.isArray(taskReportData?.guidance)
+  && Array.isArray(taskReportData?.recent)
+  && taskReportData.recent.length <= 3;
 const hasUsableCompactMetrics = ultraMinimalProfile || (compactMetricsData?.compact === true
   && Array.isArray(compactMetricsData?.routingHints)
   && compactMetricsData?.recent?.length <= 3
@@ -215,6 +257,8 @@ const ok = hasWorkerSendTask
     && (minimalLikeProfile || hasWorkerFinalizeTask)
     && hasUsableTaskGate
     && hasUsableBatchGate
+    && hasUsableCloseReadonly
+    && hasUsableTaskReport
     && (minimalLikeProfile || hasWorkerPlanProReview)
     && (minimalLikeProfile || hasUsableProReviewPlan)
     && compactTextOk
@@ -257,6 +301,8 @@ console.log(JSON.stringify({
   hasWorkerFinalizeTask,
   hasUsableTaskGate,
   hasUsableBatchGate,
+  hasUsableCloseReadonly,
+  hasUsableTaskReport,
   hasWorkerPlanProReview,
   hasUsableProReviewPlan,
   hasReasonixAlias,

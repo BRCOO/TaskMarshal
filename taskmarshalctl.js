@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  readdirSync,
   statSync,
   writeFileSync
 } from "node:fs";
@@ -62,10 +63,12 @@ function main() {
   if (cmd === "smoke") return smoke();
   if (cmd === "context") return contextCommand(args);
   if (cmd === "metrics") return metricsReport(args);
+  if (cmd === "tasks") return tasksReport(args);
   if (cmd === "route") return routeDecision(args);
   if (cmd === "task-create") return taskCreate(args);
   if (cmd === "checkpoint") return checkpointStep(args);
   if (cmd === "verify") return recordVerification(args);
+  if (cmd === "close-readonly") return closeReadonlyTask(args);
   if (cmd === "finalize") return finalizeTask(args);
   if (cmd === "start") return startSession(args);
   if (cmd === "list") return listSessions();
@@ -347,6 +350,10 @@ async function metricsReport(args) {
   output(await buildMetricsReport(parseMetricsArgs(args)));
 }
 
+function tasksReport(args) {
+  output(buildTasksReport(parseTasksArgs(args)));
+}
+
 async function contextCommand(args) {
   const [subcmd = "query", ...rest] = args;
   if (subcmd !== "query") throw new Error("context usage: taskmarshalctl context query --goal TEXT [--scope FILES] [--max-chars N] [--backend auto|codegraph|local-static]");
@@ -408,13 +415,25 @@ function recordVerification(args) {
   if (!id) throw new Error("verify requires --id TASK_ID");
   const status = normalizeVerification(input.status);
   const task = readTask(id);
+  output(recordVerificationData({
+    task,
+    status,
+    command: input.command,
+    exitCode: input.exitCode,
+    note: input.note,
+    session: input.session,
+    turnId: input.turnId
+  }));
+}
+
+function recordVerificationData({ task, status, command, exitCode, note, session, turnId }) {
   const verification = {
     status,
-    command: limitText(cleanText(input.command), 300) || null,
-    exitCode: input.exitCode === undefined ? null : Number(input.exitCode),
-    note: limitText(cleanText(input.note), 500) || null,
-    session: limitText(cleanText(input.session), 120) || null,
-    turnId: limitText(cleanText(input.turnId), 120) || null,
+    command: limitText(cleanText(command), 300) || null,
+    exitCode: exitCode === undefined ? null : Number(exitCode),
+    note: limitText(cleanText(note), 500) || null,
+    session: limitText(cleanText(session), 120) || null,
+    turnId: limitText(cleanText(turnId), 120) || null,
     recordedAt: new Date().toISOString()
   };
   task.verification = verification;
@@ -440,13 +459,53 @@ function recordVerification(args) {
     verification: status,
     verifiedAt: verification.recordedAt
   });
-  output({
+  return {
     ok: true,
     taskId: task.id,
     verification: status,
     exitCode: verification.exitCode,
     linkedMetric,
     next: status === "pass" ? "finalize" : "fix_or_skip"
+  };
+}
+
+function closeReadonlyTask(args) {
+  const input = parseKeyValueArgs(args);
+  const id = input.id;
+  if (!id) throw new Error("close-readonly requires --id TASK_ID");
+  const status = normalizeVerification(input.status || "pass");
+  const task = readTask(id);
+  const now = new Date().toISOString();
+  const note = limitText(cleanText(input.note), 300) || "Read-only worker task closed.";
+  for (const step of task.steps) {
+    if (step.status !== "done") {
+      step.status = "done";
+      step.note = note;
+      step.completedAt = now;
+    }
+  }
+  task.updatedAt = now;
+  writeTask(task);
+  const verification = recordVerificationData({
+    task,
+    status,
+    command: cleanText(input.command) || "read-only worker audit accepted",
+    exitCode: input.exitCode,
+    note,
+    session: input.session,
+    turnId: input.turnId
+  });
+  const finalized = finalizeTaskData(task.id);
+  output({
+    ok: Boolean(finalized.done),
+    taskId: task.id,
+    verification: verification.verification,
+    linkedMetric: verification.linkedMetric,
+    done: finalized.done,
+    taskKey: finalized.taskKey,
+    completed: finalized.completed,
+    totalSteps: finalized.totalSteps,
+    next: finalized.done ? "accept" : "inspect_task"
   });
 }
 
@@ -480,6 +539,10 @@ function finalizeTask(args) {
   const input = parseKeyValueArgs(args);
   const id = input.id;
   if (!id) throw new Error("finalize requires --id TASK_ID");
+  output(finalizeTaskData(id));
+}
+
+function finalizeTaskData(id) {
   const task = readTask(id);
   const completed = task.steps.filter((step) => step.status === "done").length;
   const verification = task.verification?.status ?? "unknown";
@@ -489,7 +552,7 @@ function finalizeTask(args) {
   task.taskKey = taskKey;
   task.updatedAt = new Date().toISOString();
   writeTask(task);
-  output({
+  return {
     ok: done,
     taskId: task.id,
     done,
@@ -498,7 +561,7 @@ function finalizeTask(args) {
     totalSteps: task.steps.length,
     verification,
     next: done ? "accept" : "complete_steps_or_verify"
-  });
+  };
 }
 
 async function postSessionCommand(args, command) {
@@ -957,6 +1020,28 @@ function parseMetricsArgs(args) {
   }
   if (out.since && Number.isNaN(Date.parse(out.since))) {
     throw new Error("--since must be a parseable date or timestamp");
+  }
+  return out;
+}
+
+function parseTasksArgs(args) {
+  const out = {
+    limit: 20,
+    status: null,
+    compact: false
+  };
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i];
+    if (a === "--limit") out.limit = Number(args[++i] || out.limit);
+    else if (a === "--status") out.status = args[++i] || null;
+    else if (a === "--compact") out.compact = true;
+    else throw new Error(`Unknown tasks option: ${a}`);
+  }
+  if (!Number.isInteger(out.limit) || out.limit < 1 || out.limit > 500) {
+    throw new Error("--limit must be an integer between 1 and 500");
+  }
+  if (out.status && !["open", "blocked", "done"].includes(out.status)) {
+    throw new Error("--status must be one of: open, blocked, done");
   }
   return out;
 }
@@ -1428,6 +1513,153 @@ function latestTaskVerificationRecords(records) {
   return [...unkeyed, ...keyed.values()];
 }
 
+function buildTasksReport({ limit = 20, status = null, compact = false } = {}) {
+  const tasks = readAllTasks();
+  const valid = tasks.filter((item) => !item.malformed);
+  const filtered = status ? valid.filter((item) => item.status === status) : valid;
+  const staleCutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const openish = valid.filter((item) => item.status !== "done");
+  const passButNotDone = valid.filter((item) => item.verification === "pass" && item.status !== "done");
+  const openWorkerTasks = openish.filter((item) => item.route !== "local" && item.verification === "none");
+  const recent = filtered
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, limit);
+  const report = {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    source: ".taskmarshal/tasks",
+    filters: { limit, status, compact },
+    totals: {
+      taskCount: valid.length,
+      malformedCount: tasks.length - valid.length,
+      byStatus: countBy(valid, "status"),
+      byVerification: countBy(valid, "verification"),
+      openOrBlockedCount: openish.length,
+      passButNotDoneCount: passButNotDone.length,
+      staleOpenCount: openish.filter((item) => {
+        const ts = Date.parse(item.updatedAt || "");
+        return Number.isFinite(ts) && ts < staleCutoff;
+      }).length
+    },
+    guidance: buildTasksGuidance({ openish, passButNotDone, openWorkerTasks, malformedCount: tasks.length - valid.length })
+  };
+  if (compact) {
+    report.compact = true;
+    report.guidance = buildCompactTasksGuidance({ openish, passButNotDone, openWorkerTasks, malformedCount: tasks.length - valid.length });
+    report.recent = recent.slice(0, Math.min(limit, 3)).map(compactTaskRecord);
+    report.attention = [
+      ...passButNotDone.slice(0, 2).map((item) => ({ kind: "pass_not_finalized", ...compactTaskRecord(item) })),
+      ...openWorkerTasks.slice(0, 2).map((item) => ({ kind: "open_worker_task", ...compactTaskRecord(item) }))
+    ].slice(0, 3);
+    return report;
+  }
+  report.recent = recent;
+  return report;
+}
+
+function readAllTasks() {
+  if (!existsSync(TASK_DIR)) return [];
+  return readdirSyncSafe(TASK_DIR)
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const path = resolve(TASK_DIR, entry.name, "task.json");
+      const raw = existsSync(path) ? readFileSync(path, "utf8").replace(/^\uFEFF/, "") : "";
+      try {
+        return normalizeTaskRecord(JSON.parse(raw));
+      } catch (err) {
+        return {
+          id: entry.name,
+          status: "malformed",
+          route: null,
+          risk: null,
+          verification: "malformed",
+          updatedAt: null,
+          doneSteps: 0,
+          totalSteps: 0,
+          taskKey: false,
+          goal: "",
+          malformed: true,
+          error: err.message
+        };
+      }
+    });
+}
+
+function normalizeTaskRecord(task) {
+  const steps = Array.isArray(task.steps) ? task.steps : [];
+  return {
+    id: task.id,
+    status: task.status || "unknown",
+    route: task.route || null,
+    risk: task.risk || null,
+    verification: task.verification?.status || "none",
+    updatedAt: task.updatedAt || task.createdAt || null,
+    doneSteps: steps.filter((step) => step.status === "done").length,
+    totalSteps: steps.length,
+    taskKey: Boolean(task.taskKey),
+    goal: limitText(cleanText(task.goal), 160),
+    malformed: false
+  };
+}
+
+function compactTaskRecord(task) {
+  return {
+    id: task.id,
+    status: task.status,
+    route: task.route,
+    verification: task.verification,
+    steps: `${task.doneSteps}/${task.totalSteps}`,
+    taskKey: task.taskKey,
+    updatedAt: String(task.updatedAt || "").slice(0, 19) || null,
+    goal: limitText(task.goal, 80)
+  };
+}
+
+function buildCompactTasksGuidance({ openish, passButNotDone, openWorkerTasks, malformedCount }) {
+  const guidance = [];
+  if (passButNotDone.length) guidance.push("close_pass_not_finalized");
+  if (openWorkerTasks.length) guidance.push("record_worker_verification");
+  if (malformedCount) guidance.push("cleanup_malformed");
+  if (openish.length > 20) guidance.push("cleanup_stale_open");
+  if (!guidance.length) guidance.push("healthy");
+  return guidance;
+}
+
+function buildTasksGuidance({ openish, passButNotDone, openWorkerTasks, malformedCount }) {
+  const guidance = [];
+  if (passButNotDone.length) {
+    guidance.push("Some tasks have pass verification but are not finalized; use close-readonly or finalize after checkpointing steps.");
+  }
+  if (openWorkerTasks.length) {
+    guidance.push("Some worker tasks remain open with no verification; record pass/fail/skip with session+turnId or close read-only audits.");
+  }
+  if (malformedCount) {
+    guidance.push("Some task ledgers are malformed; compact reports skip them and include malformedCount for cleanup.");
+  }
+  if (openish.length > 20) {
+    guidance.push("Open task ledger count is high; periodically close stale read-only audits to keep metrics actionable.");
+  }
+  if (!guidance.length) guidance.push("Task ledgers look healthy.");
+  return guidance;
+}
+
+function countBy(items, key) {
+  const counts = {};
+  for (const item of items) {
+    const value = item[key] ?? "unknown";
+    counts[value] = (counts[value] || 0) + 1;
+  }
+  return counts;
+}
+
+function readdirSyncSafe(path) {
+  try {
+    return readdirSync(path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
 function numericOrZero(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -1513,6 +1745,17 @@ function isLocalMachineStateTask(goal, scope) {
     "skill directory",
     "mcp config",
     "codex config",
+    ".reasonixctl",
+    ".taskmarshal",
+    "reasonixctl",
+    "session logs",
+    "session log",
+    "metrics logs",
+    "metrics log",
+    "task ledger",
+    "task ledgers",
+    "worker logs",
+    "worker log",
     "api-key config",
     "apikey config",
     "api key config",

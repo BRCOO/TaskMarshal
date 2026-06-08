@@ -297,9 +297,9 @@ function registerWorkerTools() {
 
   if (enabled("worker_task_gate")) server.registerTool("worker_task_gate", {
     title: "TaskMarshal Task Gate",
-    description: "Route, create, checkpoint, verify, or finalize a task.",
+    description: "Route, create, checkpoint, verify, finalize, close read-only tasks, or report task ledgers.",
     inputSchema: {
-      action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]).default("route").describe("Gate action."),
+      action: z.enum(["route", "create", "checkpoint", "verify", "finalize", "close-readonly", "tasks"]).default("route").describe("Gate action."),
       goal: z.string().default("").describe("Short task goal for route/create."),
       scope: z.string().default("").describe("Files/modules."),
       risk: RouteRisk.default("medium").describe("Risk level."),
@@ -315,7 +315,7 @@ function registerWorkerTools() {
       turnId: z.string().default("").describe("Turn id for metric patching."),
       note: z.string().default("").describe("Short note."),
       batch: z.array(z.object({
-        action: z.enum(["route", "create", "checkpoint", "verify", "finalize"]),
+        action: z.enum(["route", "create", "checkpoint", "verify", "finalize", "close-readonly", "tasks"]),
         goal: z.string().optional(),
         scope: z.string().optional(),
         risk: RouteRisk.optional(),
@@ -726,6 +726,7 @@ async function runTaskGate(input) {
     const missing = missingFields(input, ["goal"]);
     if (missing.length) return failure(`Missing required field(s) for task gate create: ${missing.join(", ")}`);
     const args = ["task-create", "--goal", input.goal, "--risk", input.risk];
+    if (input.id) args.push("--id", input.id);
     if (input.scope) args.push("--scope", input.scope);
     if (input.route) args.push("--route", input.route);
     if (input.steps) args.push("--steps", input.steps);
@@ -753,6 +754,21 @@ async function runTaskGate(input) {
     const missing = missingFields(input, ["id"]);
     if (missing.length) return failure(`Missing required field(s) for task gate finalize: ${missing.join(", ")}`);
     return tagTaskGateResult(action, await runCtl(["finalize", "--id", input.id]));
+  }
+  if (action === "close-readonly") {
+    const missing = missingFields(input, ["id"]);
+    if (missing.length) return failure(`Missing required field(s) for task gate close-readonly: ${missing.join(", ")}`);
+    const args = ["close-readonly", "--id", input.id, "--status", input.status || "pass"];
+    if (input.command) args.push("--command", input.command);
+    if (input.exitCode !== undefined) args.push("--exit-code", String(input.exitCode));
+    if (input.session) args.push("--session", input.session);
+    if (input.turnId) args.push("--turn-id", input.turnId);
+    if (input.note) args.push("--note", input.note);
+    return tagTaskGateResult(action, await runCtl(args));
+  }
+  if (action === "tasks") {
+    const args = ["tasks", "--compact"];
+    return tagTaskGateResult(action, await runCtl(args));
   }
   return failure(`Unsupported task gate action: ${action}`);
 }

@@ -14,7 +14,8 @@ const BUDGETS = {
   compactContextStructuredChars: 1400,
   observeSummaryStructuredChars: 900,
   observeFinalStructuredChars: 800,
-  compactMetricsStructuredChars: 3600
+  compactMetricsStructuredChars: 3600,
+  compactTasksStructuredChars: 2800
 };
 process.on("exit", cleanupSyntheticReasonixSession);
 
@@ -109,6 +110,19 @@ const metrics = await withMcp({
   };
 });
 
+const tasks = await withMcp({
+  TASKMARSHAL_TOOL_PROFILE: "minimal",
+  TASKMARSHAL_COMPACT_TOOL_TEXT: "1"
+}, async (client) => {
+  const compact = await client.callTool({
+    name: "worker_task_gate",
+    arguments: { action: "tasks" }
+  });
+  return {
+    compact: measureToolResult(compact)
+  };
+});
+
 cleanupSyntheticReasonixSession();
 
 const comparisons = {
@@ -130,6 +144,7 @@ const ok = comparisons.toolListChars.savedChars > 0
   && comparisons.observeSummaryChars.savedChars > 0
   && comparisons.observeFinalChars.savedChars > 0
   && comparisons.metricsCompactChars.savedChars > 0
+  && tasks.compact.structuredChars > 0
   && withinBudgets();
 
 console.log(JSON.stringify({
@@ -153,7 +168,8 @@ console.log(JSON.stringify({
     },
     context,
     observe,
-    metrics
+    metrics,
+    tasks
   },
   comparisons
 }, null, 2));
@@ -223,7 +239,8 @@ function withinBudgets() {
     && context.query.structuredChars <= BUDGETS.compactContextStructuredChars
     && observe.summary.structuredChars <= BUDGETS.observeSummaryStructuredChars
     && observe.final.structuredChars <= BUDGETS.observeFinalStructuredChars
-    && metrics.compact.structuredChars <= BUDGETS.compactMetricsStructuredChars;
+    && metrics.compact.structuredChars <= BUDGETS.compactMetricsStructuredChars
+    && tasks.compact.structuredChars <= BUDGETS.compactTasksStructuredChars;
 }
 
 function budgetReport() {
@@ -233,7 +250,8 @@ function budgetReport() {
     compactContextStructuredChars: budgetItem(context.query.structuredChars, BUDGETS.compactContextStructuredChars),
     observeSummaryStructuredChars: budgetItem(observe.summary.structuredChars, BUDGETS.observeSummaryStructuredChars),
     observeFinalStructuredChars: budgetItem(observe.final.structuredChars, BUDGETS.observeFinalStructuredChars),
-    compactMetricsStructuredChars: budgetItem(metrics.compact.structuredChars, BUDGETS.compactMetricsStructuredChars)
+    compactMetricsStructuredChars: budgetItem(metrics.compact.structuredChars, BUDGETS.compactMetricsStructuredChars),
+    compactTasksStructuredChars: budgetItem(tasks.compact.structuredChars, BUDGETS.compactTasksStructuredChars)
   };
 }
 

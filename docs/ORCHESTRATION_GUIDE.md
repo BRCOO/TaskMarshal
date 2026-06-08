@@ -37,6 +37,8 @@ worker_task_gate(action: "create", goal: "...", scope: "...", risk: "medium", ro
 worker_task_gate(action: "checkpoint", id: "task", step: "s1")
 worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm test")
 worker_task_gate(action: "finalize", id: "task")
+worker_task_gate(action: "close-readonly", id: "task", status: "pass")
+worker_task_gate(action: "tasks")
 ```
 
 The task ledger is written under local `.taskmarshal/tasks/` and is ignored by
@@ -48,6 +50,18 @@ compatibility, but `worker_task_gate` is the preferred low-token path.
 Use `worker_task_gate(batch: [...])` when Codex already knows several gate
 operations can run in order, such as checkpointing all completed steps, recording
 verification, and finalizing.
+
+For read-only audits, prefer `close-readonly` when the worker produced usable
+evidence but no files changed. It marks unfinished ledger steps done, records
+pass/fail/skip verification, finalizes the task, and returns the taskKey in one
+short packet. This avoids a common weak state: a pass result that still looks
+open or unknown in later metrics.
+
+Use `worker_task_gate(action: "tasks")` or
+`taskmarshalctl tasks --compact --limit 20` to inspect task-ledger health
+without reading `.taskmarshal/tasks/**/task.json` individually. The compact
+report highlights pass-but-not-finalized tasks, open worker tasks with no
+verification, stale open ledgers, and malformed task records.
 
 ## MCP Token Controls
 
@@ -90,11 +104,13 @@ It compares:
 - standard vs minimal MCP tool count and tool-list character size
 - `worker_observe(mode: "events")` vs `summary` and `final`
 - normal `worker_metrics_report` vs `compact: true`
+- compact task-ledger report size through `worker_task_gate(action: "tasks")`
 
 The benchmark reports exact character counts and approximate token counts
 using 4 chars/token. Treat chars as the stable regression metric. Current hard
 budgets are: minimal tool list <= 10500 chars, observe summary <= 900 chars,
-observe final <= 800 chars, and compact metrics <= 3600 chars.
+observe final <= 800 chars, compact metrics <= 3600 chars, and compact task
+ledger report <= 2800 chars.
 
 ## Delegation Packet
 
@@ -225,6 +241,19 @@ worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm tes
 
 Both paths reduce `unknown` verification counts, so future routing decisions are
 based on verified worker outcomes instead of only static heuristics.
+
+When unknown verification or open-ledger counts rise, check the ledger report
+before reading logs:
+
+```text
+worker_task_gate(action: "tasks")
+```
+
+If the task was read-only and the evidence is enough, close it directly:
+
+```text
+worker_task_gate(action: "close-readonly", id: "task", status: "pass", command: "reviewed worker final")
+```
 
 ## Pro Second Pass
 

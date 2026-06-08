@@ -181,11 +181,19 @@ worker_task_gate(action: "create", goal: "...", scope: "...", risk: "medium")
 worker_task_gate(action: "checkpoint", id: "task", step: "s1")
 worker_task_gate(action: "verify", id: "task", status: "pass", session: "audit", turnId: "TURN_ID")
 worker_task_gate(action: "finalize", id: "task")
+worker_task_gate(action: "close-readonly", id: "task", status: "pass")
+worker_task_gate(action: "tasks")
 ```
 
 Use `worker_task_gate(batch: [...])` when several gate operations can run in one
 ordered call, for example checkpoint completed steps, record verification, and
 finalize.
+
+Use `worker_task_gate(action: "tasks")` before reading task ledgers or worker
+logs for closeout hygiene. For read-only audits that produced sufficient
+evidence, use `worker_task_gate(action: "close-readonly")` to mark remaining
+steps done, record verification, finalize, and return a taskKey in one compact
+packet.
 
 If only individual gate tools are available, use the equivalent
 `worker_route_decision`, `worker_create_task`, `worker_checkpoint_step`,

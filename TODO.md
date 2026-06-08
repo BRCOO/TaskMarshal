@@ -128,6 +128,9 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add a local eval suite.
   - Acceptance: `npm run eval` verifies representative local/flash/pro routing
     and task-gate finalization.
+- [x] Expand local-only routing for logs, metrics, and task ledgers.
+  - Acceptance: inspection of `.reasonixctl`, `.taskmarshal`, session logs,
+    metrics logs, and task ledgers routes to Local instead of worker audit.
 - [x] Add token-saving benchmarks.
   - Acceptance: `npm run eval:tokens` compares standard, minimal, and
     ultra-minimal MCP tool-list size plus compact observe and compact metrics
@@ -135,6 +138,14 @@ delegation more controlled, verifiable, and reusable.
 - [x] Add output-contract and verification guidance to metrics.
   - Acceptance: compact metrics can flag missing output contracts and unknown
     verification records before routing quality silently degrades.
+- [x] Add a compact task-ledger report.
+  - Acceptance: `worker_task_gate(action: "tasks")` and
+    `taskmarshalctl tasks --compact` summarize open, blocked, pass-but-not-done,
+    stale, and malformed task records without loading every ledger into Codex.
+- [x] Add a read-only closeout helper.
+  - Acceptance: `worker_task_gate(action: "close-readonly")` and
+    `taskmarshalctl close-readonly` close read-only audits, record
+    verification, finalize, and return a taskKey in one compact packet.
 
 ## P5 - Next Optimizations
 

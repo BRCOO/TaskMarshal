@@ -29,6 +29,11 @@ const cases = [
     name: "local machine state stays local",
     args: ["route", "--goal", "audit installed TaskMarshal skill in ~/.codex/skills", "--scope", "~/.codex/skills/taskmarshal/SKILL.md", "--risk", "medium", "--files", "3"],
     expect: (data) => data.route === "local" && data.reasonCodes?.includes("LOCAL_MACHINE_STATE")
+  },
+  {
+    name: "local logs and ledgers stay local",
+    args: ["route", "--goal", "inspect .reasonixctl session logs and .taskmarshal task ledgers", "--scope", ".reasonixctl,.taskmarshal", "--risk", "low", "--files", "3"],
+    expect: (data) => data.route === "local" && data.reasonCodes?.includes("LOCAL_MACHINE_STATE")
   }
 ];
 
@@ -120,7 +125,7 @@ results.push({
   error: configPrint.error || configUltraPrint.error || configWrite.error || configWriteAgain.error || configMerge.error
 });
 
-const task = run(["task-create", "--goal", "eval token firewall", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "plan;verify"]);
+const task = run(["task-create", "--id", "tm-eval-token-firewall", "--goal", "eval token firewall", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "plan;verify"]);
 let gatePassed = false;
 if (task.ok && task.data.taskId) {
   run(["checkpoint", "--id", task.data.taskId, "--step", "s1", "--note", "eval"]);
@@ -133,10 +138,64 @@ if (task.ok && task.data.taskId) {
   results.push({ name: "task gate finalizes", passed: false, data: task.data, error: task.error });
 }
 
+const readonlyTask = run([
+  "task-create",
+  "--id",
+  "tm-eval-readonly-close",
+  "--goal",
+  "eval read-only close helper",
+  "--scope",
+  "taskmarshalctl.js",
+  "--risk",
+  "low",
+  "--route",
+  "flash",
+  "--steps",
+  "inspect;report"
+]);
+if (readonlyTask.ok && readonlyTask.data.taskId) {
+  const closeReadonly = run([
+    "close-readonly",
+    "--id",
+    readonlyTask.data.taskId,
+    "--status",
+    "pass",
+    "--command",
+    "read-only eval",
+    "--note",
+    "eval"
+  ]);
+  results.push({
+    name: "close-readonly finalizes read-only task",
+    passed: closeReadonly.ok
+      && closeReadonly.data?.done === true
+      && closeReadonly.data?.completed === closeReadonly.data?.totalSteps
+      && typeof closeReadonly.data?.taskKey === "string",
+    data: closeReadonly.data,
+    error: closeReadonly.error
+  });
+} else {
+  results.push({ name: "close-readonly finalizes read-only task", passed: false, data: readonlyTask.data, error: readonlyTask.error });
+}
+
+const compactTasks = run(["tasks", "--compact", "--limit", "5"]);
+results.push({
+  name: "compact tasks report",
+  passed: compactTasks.ok
+    && compactTasks.data?.compact === true
+    && compactTasks.data?.totals?.taskCount >= 1
+    && Number.isInteger(compactTasks.data?.totals?.openOrBlockedCount)
+    && Array.isArray(compactTasks.data?.guidance)
+    && Array.isArray(compactTasks.data?.recent)
+    && compactTasks.data.recent.length <= 3,
+  data: compactTasks.data,
+  error: compactTasks.error
+});
+
 const verificationSessionId = "tm-eval-verification-link";
 const verificationTurnId = "synthetic-verify-turn";
 createSyntheticMetricsSession(verificationSessionId, verificationTurnId);
-const linkedTask = run(["task-create", "--goal", "eval verification link", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
+const linkedTask = run(["task-create", "--id", "tm-eval-verification-link-task", "--goal", "eval verification link", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
 if (linkedTask.ok && linkedTask.data.taskId) {
   run(["checkpoint", "--id", linkedTask.data.taskId, "--step", "s1", "--note", "eval"]);
   const linkedVerify = run([
@@ -167,7 +226,7 @@ if (linkedTask.ok && linkedTask.data.taskId) {
 
 const mergeSessionId = "tm-eval-taskid-merge";
 const mergeTurnId = "synthetic-merge-turn";
-const mergeTask = run(["task-create", "--goal", "eval taskid merge", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
+const mergeTask = run(["task-create", "--id", "tm-eval-taskid-merge-task", "--goal", "eval taskid merge", "--scope", "taskmarshalctl.js", "--risk", "low", "--route", "flash", "--steps", "verify"]);
 if (mergeTask.ok && mergeTask.data.taskId) {
   createSyntheticMetricsSession(mergeSessionId, mergeTurnId, mergeTask.data.taskId);
   run(["checkpoint", "--id", mergeTask.data.taskId, "--step", "s1", "--note", "eval"]);

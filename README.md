@@ -57,8 +57,9 @@ Coding agents are useful executors, but architecture ownership should stay with 
 - Compact observation modes for token-sensitive supervision
 - Session summaries with lightweight task metrics
 - Cross-session metrics reports for routing and token-efficiency tuning
+- Compact task ledger reports for closeout and verification hygiene
 - Token-firewall task gates with short control packets and task keys
-- Merged `worker_task_gate` for route/create/checkpoint/verify/finalize control
+- Merged `worker_task_gate` for route/create/checkpoint/verify/finalize/closeout control
 - Batch task gate calls for fewer MCP round trips
 - Minimal and ultra-minimal MCP tool profiles plus compact tool text mode
 - Incremental observation cursors and compact metrics reports
@@ -510,6 +511,19 @@ The economical TaskMarshal loop is:
 7. Codex records verification with `worker_task_gate(action: "verify")`.
 8. Codex finalizes with `worker_task_gate(action: "finalize")` and accepts only with a taskKey.
 
+For read-only audits, Codex can close all remaining ledger steps, record
+verification, and finalize in one compact call:
+
+```text
+worker_task_gate(action: "close-readonly", id: "TASK_ID", status: "pass", command: "read-only audit")
+```
+
+To inspect ledger health without loading task files or worker logs, use:
+
+```text
+worker_task_gate(action: "tasks")
+```
+
 When several gate operations are ready at once, Codex can use
 `worker_task_gate(batch: [...])` to reduce MCP round trips. For long worker
 sessions, Codex should observe once, store the returned cursor, then pass it as
@@ -545,6 +559,12 @@ context. Verification records from task gates are included in the metrics
 report, so routing quality can be judged from local pass/fail/skip evidence.
 Compact metrics reads only recent metric tails per session and omits long task
 verification detail lists.
+
+Use `worker_task_gate(action: "tasks")` or
+`taskmarshalctl tasks --compact --limit 20` when the problem is ledger hygiene:
+open tasks, pass-but-not-finalized tasks, stale read-only audits, or malformed
+task records. This keeps Codex from reading `.taskmarshal/tasks/**/task.json`
+one file at a time.
 
 `taskmarshalctl route` uses compact metrics evidence when available. It keeps
 small tasks local, tightens worker output budgets when recent worker output is
