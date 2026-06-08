@@ -17,10 +17,9 @@ description: >
 # TaskMarshal
 
 TaskMarshal lets Codex act as planner, dispatcher, permission gate, and final
-reviewer while local CLI agents act as bounded execution workers.
+reviewer while local CLI agents execute bounded work.
 
-Keep this skill as a lean routing policy. Detailed task specs, yield summaries,
-and orchestration guidance live in the repository examples/docs:
+Keep this skill lean. Detailed packets and operating docs live in:
 
 - `examples/task-spec.yaml`
 - `examples/worker-yield-summary.md`
@@ -31,66 +30,57 @@ and orchestration guidance live in the repository examples/docs:
 
 Before starting a worker, decide whether delegation is worth the overhead.
 
-Do not delegate by default for quick Q&A, simple terminal checks, tiny
-one-file patches, formatting-only edits, routine docs, or short lookups Codex
-can verify directly.
+Do not delegate by default for quick Q&A, simple terminal checks, formatting,
+routine docs, short lookups, or a tiny one-file patch Codex can verify directly.
 
-Keep local to Codex when the task depends on user-specific local state outside
-the repository, such as `~/.codex`, `~/.agents`, installed skills, MCP config,
-API-key config, shell profiles, or other home-directory files. Workers may run
-with different permissions or a narrower sandbox, so they are not reliable
-auditors for these paths unless the user explicitly asks to grant that access.
+Keep local to Codex when work depends on user-specific machine state:
+`~/.codex`, `~/.agents`, installed skills, MCP config, API-key config, shell
+profiles, home-directory files, `.reasonixctl`, `.taskmarshal`, session logs,
+metrics logs, task ledgers, or worker logs. Workers may have different
+permissions. Do not ask workers to inspect those paths unless the user
+explicitly approves that scope.
 
 Use TaskMarshal when at least one is true:
 
 - user explicitly asks for TaskMarshal, Reasonix, DeepSeek, Claude Code,
-  workers, subagents, or planner/executor/reviewer flow
-- task spans multiple files, modules, packages, or architecture layers
+  workers, subagents, planner/executor, or architect/reviewer flow
+- task spans three or more files, packages, modules, or architecture layers
 - task needs long exploration, reproduction, debugging, or independent review
-- task is technical research, tool selection, product comparison, or
+- task is technical research, product comparison, tool selection, or
   engineering due diligence where a second pass reduces risk
-- Codex should keep architecture decisions while a worker performs bounded
-  execution
+- Codex should keep architecture decisions while a worker executes bounded work
 
 ## Delegation Score
 
-Score the task before starting a worker:
-
 - `+2` explicit worker/TaskMarshal/provider/planner-executor request
-- `+2` three or more files, packages, or architecture layers
-- `+2` long repo exploration, reproduction, or debugging
-- `+2` technical research or tool/product comparison with multiple candidates
+- `+2` three or more files/packages/layers
+- `+2` long repo exploration, reproduction, debugging, technical research, or
+  multi-candidate tool/product comparison
 - `+1` independent implementation or verification would reduce risk
 - `+1` worker can run in parallel with local Codex work
-- `-2` quick answer, simple command, or obvious local edit
-- `-2` simple lookup or short research answer Codex can verify directly
-- `-2` tiny one-file patch with clear implementation
-- `-3` task depends on local Codex/skill/MCP config, user home directories, or
-  private machine state that the worker may not be allowed to read
+- `-2` quick answer, simple command, obvious local edit, short lookup, or tiny
+  one-file patch
+- `-3` local Codex/skill/MCP config, user home directories, or private machine
+  state may not be readable by the worker
 - `-1` worker would need broad permissions before Codex scopes the work
 
-Decision:
-
-- score `<= 0`: Local Mode. Do not start a worker.
-- score `1-2`: Light Mode if a second pass is genuinely useful.
-- score `>= 3`: Full Marshal Mode.
-
-Do not show the numeric score unless it helps explain a decision.
+Decision: score `<= 0` means Local Mode; score `1-2` means Light Mode only if a
+second pass is genuinely useful; score `>= 3` means Full Marshal Mode. Do not
+show the numeric score unless it clarifies a decision.
 
 ## Modes
 
 - **Local Mode:** Codex handles the task directly.
 - **Light Mode:** one bounded worker prompt, then Codex reviews.
-- **Full Marshal Mode:** Codex inspects, writes a compact task spec, dispatches
-  a worker, gates permissions, reviews diffs, verifies, and accepts or rejects.
+- **Full Marshal Mode:** Codex plans, dispatches, observes, approves, reviews,
+  verifies, and accepts or rejects.
 - **Async Audit Mode:** for long read-only audits or broad research. Start a
-  persistent session, send the task, observe opportunistically, and keep local
-  work moving.
+  persistent session, send the task, observe opportunistically, and continue
+  local work.
 
-If an async audit hits a permission boundary, stop or ignore that worker turn,
-record the limitation, and continue with local evidence. Do not tell the user
-that Codex will merge an independent opinion from a worker that cannot inspect
-the required files.
+If an async audit hits a permission boundary, stop or ignore that turn, state
+the limitation, and continue from local evidence. Do not promise to merge
+findings from files the worker cannot inspect.
 
 ## Provider Choice
 
@@ -103,51 +93,34 @@ the required files.
 - `claude-code`: one-shot or resumable Claude Code analysis when external
   approval callbacks are not required.
 
+Use `worker_plan_pro_review` before spending a Reasonix `pro` pass. Reserve
+`pro` for architecture, tricky debugging, security-sensitive work, uncertain
+`flash` results, and final review.
+
 ## Dispatch Rules
 
-- Codex owns architecture, task design, provider choice, permissions, final
-  review, and user communication.
-- Workers execute bounded tasks. Treat worker output as a proposed patch, not
-  accepted work.
-- Do not ask workers to inspect Codex's installed skills, user MCP config, API
-  key config, or other home-directory state unless the user explicitly approves
-  that scope.
-- Send compact task specs instead of chat transcripts. Use
-  `examples/task-spec.yaml` for Full Marshal tasks.
-- Require a short worker plan before edits on Full Marshal tasks unless the
-  task is read-only or Codex gave exact edits.
-- Ask workers to return `examples/worker-yield-summary.md` and run
-  `examples/worker-self-review.md` before handoff.
-- Worker final output is capped by default. Expect only these fields:
-  `changedFiles`, `commands`, `verification`, `risks`, and `next`.
-  Default cap is 1200 characters. Use `--output-max-chars N` only when Codex
-  truly needs a larger handoff, and `--no-output-contract` only for diagnostics.
+Codex owns architecture, task design, provider choice, permissions, final
+review, and user communication. Workers execute bounded tasks; treat worker
+output as a proposed patch, not accepted work.
+
+Send compact task specs, not chat transcripts. Use `examples/task-spec.yaml`
+for Full Marshal tasks. Require a short worker plan before edits unless the
+task is read-only or Codex gave exact edits. Ask workers to return
+`examples/worker-yield-summary.md` and run `examples/worker-self-review.md`.
+
+Worker final output is capped by default. Expect only `changedFiles`,
+`commands`, `verification`, `risks`, and `next`. Default cap is 1200 chars. Use
+`--output-max-chars N` only when Codex truly needs a larger handoff, and
+`--no-output-contract` only for diagnostics.
+
+Approve only scoped, expected, non-destructive worker requests. Deny requests
+that exceed scope, touch secrets, run destructive git commands, install
+unrelated dependencies, or change unrelated files.
 
 ## MCP Use
 
-Prefer provider-neutral tools:
-
-- `worker_list_providers`
-- `worker_doctor`
-- `worker_start_session`
-- `worker_send_task`
-- `worker_observe`
-- `worker_summarize_session`
-- `worker_metrics_report`
-- `worker_task_gate`
-- `worker_route_decision`
-- `worker_create_task`
-- `worker_checkpoint_step`
-- `worker_record_verification`
-- `worker_finalize_task`
-- `worker_plan_pro_review`
-- `worker_approve`
-- `worker_deny`
-- `worker_cancel`
-- `worker_stop`
-
-For long audits or broad repo work, avoid `worker_ask` / `reasonix_ask`.
-Use persistent sessions:
+Prefer provider-neutral `worker_*` tools. For long audits or broad repo work,
+avoid `worker_ask` / `reasonix_ask`; use persistent sessions:
 
 ```text
 worker_start_session(provider: "reasonix", id: "audit", approve: "manual", model: "flash")
@@ -158,22 +131,16 @@ worker_summarize_session(provider: "reasonix", id: "audit", maxChars: 6000)
 worker_metrics_report(provider: "reasonix", limit: 20, compact: true)
 ```
 
-Every observation returns a numeric cursor. `worker_observe` defaults to
-`summary`; pass the cursor as `since` on the next observe call to avoid
-re-reading old event tails. Use `worker_observe(mode: "events")` only when
-compact summary/final/permission views are not enough.
+`worker_observe` defaults to summary. Use `summary`, `final`, or `permission`
+with `maxChars`; use `events` only when compact state is insufficient. Every
+observation returns a cursor; pass `since` next time to avoid re-reading old
+event tails.
 
-Use `worker_metrics_report` when deciding whether routing is saving tokens or
-when repeated worker turns feel too verbose, slow, or weakly verified. Prefer
-`compact: true` for normal routing checks.
+Use `worker_metrics_report(compact: true)` when deciding whether routing is
+saving tokens or worker turns are verbose, slow, or weakly verified. When
+editing token controls, run `npm run eval:tokens`.
 
-When editing TaskMarshal token controls, run `npm run eval:tokens` to compare
-standard vs minimal MCP tool text, events vs summary/final observation, and
-normal vs compact metrics output. The benchmark has hard budgets for compact
-paths and should fail on token regressions.
-
-For substantial delegated work, prefer the merged token-firewall gate. Codex
-should pass short fields, then rely on local task ledgers and taskKey gates:
+For delegated work, prefer the merged token-firewall gate:
 
 ```text
 worker_task_gate(action: "route", goal: "...", scope: "...", risk: "medium")
@@ -185,24 +152,13 @@ worker_task_gate(action: "close-readonly", id: "task", status: "pass")
 worker_task_gate(action: "tasks")
 ```
 
-Use `worker_task_gate(batch: [...])` when several gate operations can run in one
-ordered call, for example checkpoint completed steps, record verification, and
-finalize.
+Use `worker_task_gate(batch: [...])` when checkpoint, verify, and finalize can
+run in one ordered call. Use `worker_task_gate(action: "tasks")` before reading
+task ledgers or worker logs for closeout hygiene. For read-only audits with
+sufficient evidence, use `worker_task_gate(action: "close-readonly")` to mark
+remaining steps done, record verification, finalize, and return a taskKey in one
+compact packet.
 
-Use `worker_task_gate(action: "tasks")` before reading task ledgers or worker
-logs for closeout hygiene. For read-only audits that produced sufficient
-evidence, use `worker_task_gate(action: "close-readonly")` to mark remaining
-steps done, record verification, finalize, and return a taskKey in one compact
-packet.
-
-If only individual gate tools are available, use the equivalent
+If merged gate is unavailable, use equivalent individual tools:
 `worker_route_decision`, `worker_create_task`, `worker_checkpoint_step`,
-`worker_record_verification`, and `worker_finalize_task` calls.
-
-Use `worker_plan_pro_review` before spending a Reasonix `pro` pass. Reserve
-`pro` for architecture, tricky debugging, security-sensitive work, uncertain
-`flash` results, and final review.
-
-Approve only scoped, expected, non-destructive worker requests. Deny or cancel
-requests that exceed scope, touch secrets, perform destructive git commands,
-install unrelated dependencies, or change unrelated files.
+`worker_record_verification`, and `worker_finalize_task`.
