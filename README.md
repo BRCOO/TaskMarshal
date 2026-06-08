@@ -110,6 +110,7 @@ npm run eval
 npm run eval:tokens
 npm run eval:quality
 npm run eval:codex-ab
+npm run eval:skillopt
 ```
 
 ### 3. Register the MCP server with Codex
@@ -277,6 +278,7 @@ To quantify token-saving regressions, run:
 npm run eval:tokens
 npm run eval:quality
 npm run eval:codex-ab
+npm run eval:skillopt
 ```
 
 The benchmark compares standard, minimal, and ultra-minimal MCP tool-list size,
@@ -322,6 +324,26 @@ Each record should include:
   "elapsedSec": 420
 }
 ```
+
+## Offline Skill Optimization
+
+TaskMarshal can use [microsoft/SkillOpt](https://github.com/microsoft/SkillOpt)
+as an offline optimizer for `skills/taskmarshal/SKILL.md`. SkillOpt is not part
+of the MCP runtime path and does not add tools or model calls during normal
+Codex use.
+
+The stable integration point is a local acceptance gate:
+
+```bash
+npm run eval:skillopt
+npm run eval:skillopt -- --candidate runs/skillopt/best_skill.md
+```
+
+The gate checks candidate skill length, required TaskMarshal routing policies,
+secret-shaped text, and expected routes from
+`examples/skillopt/taskmarshal-routing-cases.jsonl`. Candidate runs and rollout
+logs should stay under ignored paths such as `runs/skillopt/`. See
+`docs/SKILLOPT_INTEGRATION.md` for the full workflow.
 
 ## Provider Matrix
 
@@ -655,6 +677,7 @@ The grep may match documentation or source identifiers. Review matches before co
 |-- skills/taskmarshal/           # Codex Skill
 |-- scripts/mcp-smoke.js          # MCP smoke test
 |-- scripts/taskmarshal-eval.js   # Local routing and task-gate evals
+|-- scripts/skillopt-gate.js      # Offline SkillOpt candidate gate
 `-- examples/                     # Example config and worker prompt
 ```
 
@@ -666,6 +689,7 @@ The grep may match documentation or source identifiers. Review matches before co
 - Provider capability scoring
 - Task spec persistence
 - Better transcript summarization and metrics-based routing
+- Offline SkillOpt-driven skill compression and routing improvement
 - Packaged Codex plugin
 
 ## Contributing

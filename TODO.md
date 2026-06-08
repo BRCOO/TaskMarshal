@@ -149,6 +149,17 @@ delegation more controlled, verifiable, and reusable.
 
 ## P5 - Next Optimizations
 
+- [x] Add an offline SkillOpt candidate gate.
+  - Acceptance: `npm run eval:skillopt` validates candidate TaskMarshal skills
+    for size, required routing policies, secret-shaped text, and fixture route
+    behavior before any candidate can replace the installed skill.
+- [ ] Add real SkillOpt rollout samples.
+  - Acceptance: `runs/skillopt/` experiments can produce candidate skills from
+    real routing examples, while only sanitized fixtures/docs are committed.
+- [ ] Compress the TaskMarshal Skill with SkillOpt-style validation.
+  - Acceptance: candidate `SKILL.md` is materially shorter than the baseline,
+    passes `eval:skillopt`, and does not regress `eval:tokens` or
+    `eval:codex-ab`.
 - [ ] Add profile-specific short schemas for ultra-minimal tools.
   - Acceptance: ultra-minimal keeps the same eight tools but reduces tool-list
     schema text further without changing behavior.

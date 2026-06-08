@@ -19,6 +19,7 @@ sessions/
 transcripts/
 events/
 *.jsonl
+!examples/skillopt/*.jsonl
 
 # Local secrets and machine config
 config.local.*
