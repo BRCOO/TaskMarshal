@@ -132,7 +132,12 @@ if (task.ok && task.data.taskId) {
   run(["checkpoint", "--id", task.data.taskId, "--step", "s2", "--note", "eval"]);
   run(["verify", "--id", task.data.taskId, "--status", "pass", "--command", "eval"]);
   const done = run(["finalize", "--id", task.data.taskId]);
-  gatePassed = done.ok && done.data.done === true && typeof done.data.taskKey === "string";
+  const persistedSteps = readTaskSteps(task.data.taskId);
+  gatePassed = done.ok
+    && done.data.done === true
+    && typeof done.data.taskKey === "string"
+    && persistedSteps.length === 2
+    && persistedSteps.every((step) => step.status === "done");
   results.push({ name: "task gate finalizes", passed: gatePassed, data: done.data, error: done.error });
 } else {
   results.push({ name: "task gate finalizes", passed: false, data: task.data, error: task.error });
@@ -165,17 +170,54 @@ if (readonlyTask.ok && readonlyTask.data.taskId) {
     "--note",
     "eval"
   ]);
+  const persistedSteps = readTaskSteps(readonlyTask.data.taskId);
   results.push({
     name: "close-readonly finalizes read-only task",
     passed: closeReadonly.ok
       && closeReadonly.data?.done === true
       && closeReadonly.data?.completed === closeReadonly.data?.totalSteps
-      && typeof closeReadonly.data?.taskKey === "string",
+      && typeof closeReadonly.data?.taskKey === "string"
+      && persistedSteps.length === closeReadonly.data?.totalSteps
+      && persistedSteps.every((step) => step.status === "done"),
     data: closeReadonly.data,
     error: closeReadonly.error
   });
 } else {
   results.push({ name: "close-readonly finalizes read-only task", passed: false, data: readonlyTask.data, error: readonlyTask.error });
+}
+
+const verifiedTask = run([
+  "task-create",
+  "--id",
+  "tm-eval-close-verified",
+  "--goal",
+  "eval close verified helper",
+  "--scope",
+  "taskmarshalctl.js",
+  "--risk",
+  "low",
+  "--route",
+  "flash",
+  "--steps",
+  "inspect;verify"
+]);
+if (verifiedTask.ok && verifiedTask.data.taskId) {
+  run(["verify", "--id", verifiedTask.data.taskId, "--status", "pass", "--command", "eval"]);
+  const closeVerified = run(["close-verified", "--id", verifiedTask.data.taskId, "--note", "eval"]);
+  const persistedSteps = readTaskSteps(verifiedTask.data.taskId);
+  results.push({
+    name: "close-verified finalizes verified task",
+    passed: closeVerified.ok
+      && closeVerified.data?.done === true
+      && closeVerified.data?.completed === closeVerified.data?.totalSteps
+      && typeof closeVerified.data?.taskKey === "string"
+      && persistedSteps.length === closeVerified.data?.totalSteps
+      && persistedSteps.every((step) => step.status === "done"),
+    data: closeVerified.data,
+    error: closeVerified.error
+  });
+} else {
+  results.push({ name: "close-verified finalizes verified task", passed: false, data: verifiedTask.data, error: verifiedTask.error });
 }
 
 const compactTasks = run(["tasks", "--compact", "--limit", "5"]);
@@ -232,12 +274,18 @@ if (mergeTask.ok && mergeTask.data.taskId) {
   run(["checkpoint", "--id", mergeTask.data.taskId, "--step", "s1", "--note", "eval"]);
   run(["verify", "--id", mergeTask.data.taskId, "--status", "fail", "--command", "eval-fail"]);
   const mergeVerify = run(["verify", "--id", mergeTask.data.taskId, "--status", "pass", "--command", "eval"]);
+  const metrics = readSyntheticMetrics(mergeSessionId);
   const mergedMetrics = run(["metrics", "--limit", "20", "--compact"]);
   const mergedRecord = mergedMetrics.data?.recent?.find((record) => record.verification === "pass" && record.assistantChars === 20);
   results.push({
     name: "metrics merge verification by task id",
-    passed: mergeVerify.ok && mergedMetrics.ok && Boolean(mergedRecord),
-    data: { verify: mergeVerify.data, mergedRecord, taskVerification: mergedMetrics.data?.taskVerification },
+    passed: mergeVerify.ok
+      && mergeVerify.data?.linkedMetric?.ok === true
+      && mergeVerify.data?.linkedMetric?.matchedBy === "taskId"
+      && metrics.some((record) => record.turnId === mergeTurnId && record.verification === "pass")
+      && mergedMetrics.ok
+      && Boolean(mergedRecord),
+    data: { verify: mergeVerify.data, mergedRecord, metrics, taskVerification: mergedMetrics.data?.taskVerification },
     error: mergeVerify.error || mergedMetrics.error
   });
 } else {
@@ -354,4 +402,10 @@ function readSyntheticMetrics(id) {
   return existsSync(metricsPath)
     ? readFileSync(metricsPath, "utf8").trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
     : [];
+}
+
+function readTaskSteps(id) {
+  const stepsPath = resolve(process.cwd(), ".taskmarshal", "tasks", id, "steps.json");
+  if (!existsSync(stepsPath)) return [];
+  return JSON.parse(readFileSync(stepsPath, "utf8")).steps ?? [];
 }

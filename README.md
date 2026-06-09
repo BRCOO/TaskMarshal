@@ -371,7 +371,7 @@ Provider-neutral tools:
 | `worker_observe` | Read compact worker state by default; pass `mode: "events"` only for raw event tails. |
 | `worker_summarize_session` | Return a compact session digest and lightweight metrics. |
 | `worker_metrics_report` | Return a compact cross-session metrics report for routing and token-efficiency decisions. |
-| `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, finalize, and ordered batches. |
+| `worker_task_gate` | Merged token-firewall gate for route, create, checkpoint, verify, finalize, close-verified/read-only, and ordered batches. |
 | `worker_route_decision` | Return a short deterministic Local/flash/pro routing decision. |
 | `worker_create_task` | Create a local token-firewall task ledger and return a short control packet. |
 | `worker_checkpoint_step` | Mark one task step done. |
@@ -531,13 +531,20 @@ The economical TaskMarshal loop is:
 6. Codex checks `worker_metrics_report` when routing quality or token cost
    needs evidence.
 7. Codex records verification with `worker_task_gate(action: "verify")`.
-8. Codex finalizes with `worker_task_gate(action: "finalize")` and accepts only with a taskKey.
+8. Codex finalizes with `worker_task_gate(action: "close-verified")` when all remaining steps are already evidenced, or `worker_task_gate(action: "finalize")` after explicit checkpoints. Accept only with a taskKey.
 
 For read-only audits, Codex can close all remaining ledger steps, record
 verification, and finalize in one compact call:
 
 ```text
 worker_task_gate(action: "close-readonly", id: "TASK_ID", status: "pass", command: "read-only audit")
+```
+
+For implementation tasks that already have a pass/skip verification but still
+show pending ledger steps, close them in one compact call:
+
+```text
+worker_task_gate(action: "close-verified", id: "TASK_ID", note: "verified by npm test")
 ```
 
 To inspect ledger health without loading task files or worker logs, use:
@@ -596,7 +603,9 @@ failure history shows that the cheaper path is not reliable enough.
 When dispatching a token-firewall task to a worker, pass the task id to
 `worker_send_task` or `taskmarshalctl send --task-id TASK_ID`. The worker turn
 metric keeps that task id, and `worker_metrics_report` automatically merges the
-later task-gate verification by task id.
+later task-gate verification by task id. `taskmarshalctl verify` also patches
+the newest matching unknown worker metric by task id when no session/turn id is
+provided.
 
 If a worker turn was sent without a task id, pass both `--session SESSION_ID`
 and `--turn-id TURN_ID` when recording verification to patch the matching metric

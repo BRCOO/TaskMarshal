@@ -149,6 +149,7 @@ worker_task_gate(action: "checkpoint", id: "task", step: "s1")
 worker_task_gate(action: "verify", id: "task", status: "pass", session: "audit", turnId: "TURN_ID")
 worker_task_gate(action: "finalize", id: "task")
 worker_task_gate(action: "close-readonly", id: "task", status: "pass")
+worker_task_gate(action: "close-verified", id: "task")
 worker_task_gate(action: "tasks")
 ```
 
@@ -157,7 +158,9 @@ run in one ordered call. Use `worker_task_gate(action: "tasks")` before reading
 task ledgers or worker logs for closeout hygiene. For read-only audits with
 sufficient evidence, use `worker_task_gate(action: "close-readonly")` to mark
 remaining steps done, record verification, finalize, and return a taskKey in one
-compact packet.
+compact packet. For implementation tasks that already have pass/skip
+verification, use `worker_task_gate(action: "close-verified")` to mark remaining
+steps done and finalize in one compact packet.
 
 If merged gate is unavailable, use equivalent individual tools:
 `worker_route_decision`, `worker_create_task`, `worker_checkpoint_step`,

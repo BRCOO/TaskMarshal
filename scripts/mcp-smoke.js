@@ -193,6 +193,38 @@ const closeReadonly = readonlyTaskId ? await client.callTool({
     note: "smoke"
   }
 }) : null;
+const verifiedCreate = await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    action: "create",
+    id: "tm-smoke-close-verified",
+    goal: "Smoke-test verified close helper.",
+    scope: "taskmarshalctl.js",
+    risk: "low",
+    route: "flash",
+    steps: "inspect;verify"
+  }
+});
+const verifiedTaskId = verifiedCreate.structuredContent?.data?.taskId;
+if (verifiedTaskId) {
+  await client.callTool({
+    name: "worker_task_gate",
+    arguments: {
+      action: "verify",
+      id: verifiedTaskId,
+      status: "pass",
+      command: "verified smoke"
+    }
+  });
+}
+const closeVerified = verifiedTaskId ? await client.callTool({
+  name: "worker_task_gate",
+  arguments: {
+    action: "close-verified",
+    id: verifiedTaskId,
+    note: "smoke"
+  }
+}) : null;
 const taskReport = await client.callTool({
   name: "worker_task_gate",
   arguments: { action: "tasks" }
@@ -203,6 +235,7 @@ const finalizeData = finalizeResult?.structuredContent?.data;
 const compactMetricsData = compactMetricsReport?.structuredContent?.data;
 const batchFinalizeData = batchFinalize?.structuredContent?.data;
 const closeReadonlyData = closeReadonly?.structuredContent?.data;
+const closeVerifiedData = closeVerified?.structuredContent?.data;
 const taskReportData = taskReport?.structuredContent?.data;
 const hasUsableTaskGate = Boolean(taskId)
   && taskData?.artifactRoot
@@ -218,6 +251,10 @@ const hasUsableCloseReadonly = closeReadonlyData?.action === "close-readonly"
   && closeReadonlyData?.done === true
   && closeReadonlyData?.completed === closeReadonlyData?.totalSteps
   && typeof closeReadonlyData?.taskKey === "string";
+const hasUsableCloseVerified = closeVerifiedData?.action === "close-verified"
+  && closeVerifiedData?.done === true
+  && closeVerifiedData?.completed === closeVerifiedData?.totalSteps
+  && typeof closeVerifiedData?.taskKey === "string";
 const hasUsableTaskReport = taskReportData?.action === "tasks"
   && taskReportData?.compact === true
   && Number.isInteger(taskReportData?.totals?.taskCount)
@@ -258,6 +295,7 @@ const ok = hasWorkerSendTask
     && hasUsableTaskGate
     && hasUsableBatchGate
     && hasUsableCloseReadonly
+    && hasUsableCloseVerified
     && hasUsableTaskReport
     && (minimalLikeProfile || hasWorkerPlanProReview)
     && (minimalLikeProfile || hasUsableProReviewPlan)
@@ -302,6 +340,7 @@ console.log(JSON.stringify({
   hasUsableTaskGate,
   hasUsableBatchGate,
   hasUsableCloseReadonly,
+  hasUsableCloseVerified,
   hasUsableTaskReport,
   hasWorkerPlanProReview,
   hasUsableProReviewPlan,

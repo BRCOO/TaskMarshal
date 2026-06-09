@@ -69,6 +69,7 @@ function main() {
   if (cmd === "checkpoint") return checkpointStep(args);
   if (cmd === "verify") return recordVerification(args);
   if (cmd === "close-readonly") return closeReadonlyTask(args);
+  if (cmd === "close-verified") return closeVerifiedTask(args);
   if (cmd === "finalize") return finalizeTask(args);
   if (cmd === "start") return startSession(args);
   if (cmd === "list") return listSessions();
@@ -452,13 +453,19 @@ function recordVerificationData({ task, status, command, exitCode, note, session
     stepCount: task.steps.length,
     completedSteps: task.steps.filter((step) => step.status === "done").length
   });
-  const linkedMetric = updateSessionMetricVerification({
-    sessionId: verification.session,
-    turnId: verification.turnId,
-    taskId: task.id,
-    verification: status,
-    verifiedAt: verification.recordedAt
-  });
+  const linkedMetric = verification.session || verification.turnId
+    ? updateSessionMetricVerification({
+      sessionId: verification.session,
+      turnId: verification.turnId,
+      taskId: task.id,
+      verification: status,
+      verifiedAt: verification.recordedAt
+    })
+    : updateRecentSessionMetricVerificationByTaskId({
+      taskId: task.id,
+      verification: status,
+      verifiedAt: verification.recordedAt
+    });
   return {
     ok: true,
     taskId: task.id,
@@ -501,6 +508,39 @@ function closeReadonlyTask(args) {
     taskId: task.id,
     verification: verification.verification,
     linkedMetric: verification.linkedMetric,
+    done: finalized.done,
+    taskKey: finalized.taskKey,
+    completed: finalized.completed,
+    totalSteps: finalized.totalSteps,
+    next: finalized.done ? "accept" : "inspect_task"
+  });
+}
+
+function closeVerifiedTask(args) {
+  const input = parseKeyValueArgs(args);
+  const id = input.id;
+  if (!id) throw new Error("close-verified requires --id TASK_ID");
+  const task = readTask(id);
+  const verification = task.verification?.status ?? "unknown";
+  if (!["pass", "skip"].includes(verification)) {
+    throw new Error("close-verified requires an existing pass or skip verification");
+  }
+  const now = new Date().toISOString();
+  const note = limitText(cleanText(input.note), 300) || "Verified task closed.";
+  for (const step of task.steps) {
+    if (step.status !== "done") {
+      step.status = "done";
+      step.note = note;
+      step.completedAt = now;
+    }
+  }
+  task.updatedAt = now;
+  writeTask(task);
+  const finalized = finalizeTaskData(task.id);
+  output({
+    ok: Boolean(finalized.done),
+    taskId: task.id,
+    verification,
     done: finalized.done,
     taskKey: finalized.taskKey,
     completed: finalized.completed,
@@ -1101,6 +1141,7 @@ Usage:
   taskmarshalctl task-create --goal TEXT [--scope FILES] [--risk low|medium|high] [--route local|flash|pro]
   taskmarshalctl checkpoint --id TASK_ID --step STEP_ID [--note TEXT]
   taskmarshalctl verify --id TASK_ID --status pass|fail|skip [--command CMD] [--exit-code N] [--session SESSION_ID] [--turn-id TURN_ID]
+  taskmarshalctl close-verified --id TASK_ID [--note TEXT]
   taskmarshalctl finalize --id TASK_ID
   taskmarshalctl start [--dir PATH] [--approve manual|cancel|once|always|reject] [--model flash|pro|MODEL] [--preset auto|flash|pro]
   taskmarshalctl list
@@ -1886,6 +1927,9 @@ function readTask(id) {
 
 function writeTask(task) {
   writeJson(resolve(taskDir(task.id), "task.json"), task);
+  if (Array.isArray(task.steps)) {
+    writeJson(resolve(taskDir(task.id), "steps.json"), { taskId: task.id, steps: task.steps });
+  }
 }
 
 function cleanText(value) {
@@ -2223,6 +2267,69 @@ function updateSessionMetricVerification({ sessionId, turnId, taskId, verificati
     turnId: records[match.index].turnId ?? null,
     verification
   };
+}
+
+function updateRecentSessionMetricVerificationByTaskId({ taskId, verification, verifiedAt, maxSessions = 80 }) {
+  if (!taskId) return { ok: false, reason: "no_task_id" };
+  if (!existsSync(SESSION_DIR)) return { ok: false, reason: "session_dir_not_found" };
+  const matches = [];
+  const sessionEntries = readdirSyncSafe(SESSION_DIR)
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const dir = resolve(SESSION_DIR, entry.name);
+      const metricsPath = resolve(dir, "metrics.jsonl");
+      const meta = readJsonOptional(resolve(dir, "session.json"));
+      const updatedAt = meta?.updatedAt ?? (existsSync(metricsPath) ? statSync(metricsPath).mtime.toISOString() : "");
+      return { name: entry.name, metricsPath, updatedAt };
+    })
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, maxSessions);
+  for (const entry of sessionEntries) {
+    const metricsPath = entry.metricsPath;
+    if (!existsSync(metricsPath)) continue;
+    const records = readJsonlTail(metricsPath, 20);
+    records.forEach((record) => {
+      if (record.malformed) return;
+      if (record.taskId !== taskId) return;
+      if (!metricVerificationPatchable(record)) return;
+      matches.push({
+        session: entry.name,
+        metricsPath,
+        ts: record.ts ?? "",
+        turnId: record.turnId ?? null
+      });
+    });
+  }
+  matches.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+  const match = matches[0];
+  if (!match) return { ok: false, reason: "task_metric_not_found" };
+  const records = readJsonl(match.metricsPath);
+  let patched = false;
+  const next = records.map((record) => {
+    if (patched || record.malformed) return record;
+    if (record.taskId !== taskId) return record;
+    if (!metricVerificationPatchable(record)) return record;
+    if (record.turnId !== match.turnId || record.ts !== match.ts) return record;
+    patched = true;
+    return {
+      ...record,
+      verification,
+      verifiedAt
+    };
+  });
+  if (!patched) return { ok: false, reason: "task_metric_match_lost" };
+  writeFileSync(match.metricsPath, `${next.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+  return {
+    ok: true,
+    session: match.session,
+    turnId: match.turnId,
+    verification,
+    matchedBy: "taskId"
+  };
+}
+
+function metricVerificationPatchable(record) {
+  return (record.verification ?? "unknown") === "unknown" || Boolean(record.verifiedAt);
 }
 
 function readJsonlTail(path, count) {

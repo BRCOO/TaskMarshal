@@ -38,6 +38,7 @@ worker_task_gate(action: "checkpoint", id: "task", step: "s1")
 worker_task_gate(action: "verify", id: "task", status: "pass", command: "npm test")
 worker_task_gate(action: "finalize", id: "task")
 worker_task_gate(action: "close-readonly", id: "task", status: "pass")
+worker_task_gate(action: "close-verified", id: "task")
 worker_task_gate(action: "tasks")
 ```
 
@@ -56,6 +57,11 @@ evidence but no files changed. It marks unfinished ledger steps done, records
 pass/fail/skip verification, finalizes the task, and returns the taskKey in one
 short packet. This avoids a common weak state: a pass result that still looks
 open or unknown in later metrics.
+
+For implementation tasks that already have a pass/skip verification, prefer
+`close-verified` when the remaining ledger steps are evidenced by the final
+verification note. It marks unfinished steps done and finalizes in one compact
+call, avoiding extra checkpoint/finalize round trips.
 
 Use `worker_task_gate(action: "tasks")` or
 `taskmarshalctl tasks --compact --limit 20` to inspect task-ledger health
@@ -230,7 +236,9 @@ worker_send_task(provider: "reasonix", id: "audit", taskId: "task", prompt: "<bo
 ```
 
 Session metrics keep that task id, and `worker_metrics_report` automatically
-merges later task-gate verification records by task id.
+merges later task-gate verification records by task id. `taskmarshalctl verify`
+also patches the newest matching unknown worker metric by task id when no
+session/turn id is provided.
 
 For worker turns that were sent without a task id, include the worker session
 and turn when verifying:
